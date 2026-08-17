@@ -225,15 +225,15 @@ This project is licensed under the **Apache License 2.0** — see [LICENSE](./LI
 
 ## 🙏 Acknowledgments
 
-EvoQuant was built with reference to **[EvoQuantentist](https://github.com/EvoQuantentist/EvoQuantentist)** — an open-source multi-agent evolving AI scientist framework for end-to-end scientific discovery. EvoQuant reuses its agent core architecture (DeepAgents/LangGraph multi-agent runtime, memory, channels and skill system) and extends it into a domain-specific platform for autonomous quantitative research, with a rewritten skill suite for the quant research pipeline.
+EvoQuant was built with reference to **[EvoScientist](https://github.com/EvoScientist/EvoScientist)** — an open-source multi-agent evolving AI scientist framework for end-to-end scientific discovery. EvoQuant reuses its agent core architecture (DeepAgents/LangGraph multi-agent runtime, memory, channels and skill system) and extends it into a domain-specific platform for autonomous quantitative research, with a rewritten skill suite for the quant research pipeline.
 
-We thank the EvoQuantentist team for open-sourcing their work. The companion skill repository **[EvoSkills](https://github.com/EvoQuantentist/EvoSkills)** informed the design of several research-workflow skills included here.
+We thank the EvoScientist team for open-sourcing their work. The companion skill repository **[EvoSkills](https://github.com/EvoScientist/EvoSkills)** informed the design of several research-workflow skills included here.
 
-If you use EvoQuantentist in your work, please cite the original project:
+If you use EvoScientist in your work, please cite the original project:
 
 ```bibtex
-@article{evoquantentist2026,
-  title={EvoQuantentist: Towards Multi-Agent Evolving AI Scientists for End-to-End Scientific Discovery},
+@article{evoscientist2026,
+  title={EvoScientist: Towards Multi-Agent Evolving AI Scientists for End-to-End Scientific Discovery},
   author={Lyu, Yougang and Zhang, Xi and Yi, Xinhao and Zhao, Yuyue and Guo, Shuyu and Hu, Wenxiang and Piotrowski, Jan and Kaliski, Jakub and Urbani, Jacopo and Meng, Zaiqiao and Zhou, Lun and Yan, Xiaohui},
   journal={arXiv preprint arXiv:2603.08127},
   year={2026}
