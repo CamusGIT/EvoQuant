@@ -6,6 +6,16 @@ EvoQuant is a self-evolving AI research agent specialized in **quantitative inve
 
 Where general-purpose "AI scientist" frameworks target broad academic discovery, EvoQuant is **purpose-built for the quant research workflow**: alpha factor research, alpha generation methodology, and portfolio strategy research, with reproducible experiment runtimes and quantitative metrics (IC / ICIR / RANKIC / coverage) as first-class citizens.
 
+## 🎯 Why EvoQuant?
+
+Most autonomous research agents assume an open ecosystem — public papers with reference implementations on GitHub. Quantitative research rarely works that way: much of the field's methodology lives in broker research reports (研报) — unstructured PDFs that almost never ship with open-source code.
+
+EvoQuant is designed for exactly this gap:
+
+- **📖 Local knowledge extraction** — Research report PDFs dropped into `rawpaper/` become a structured, searchable private knowledge base (`wiki/`): every record carries title / source / strategy / method / experiment / result fields with inline evidence citations, extracted under strict no-fabrication rules.
+- **🔧 From-scratch reproduction** — When no reference code exists (the industry norm), EvoQuant reads reports at the L1 *"able-to-reimplement"* depth, re-implements the described method as an executable Research Artifact, and validates it on real offline market data with IC / ICIR / RANKIC metrics — rather than trusting the numbers printed in the PDF.
+- **💡 Innovation on top** — Anchor-first ideation: inherit ≥70% of an anchor report's method, contribute a focused ≤30% innovation delta, and let an ELO tournament (Final = Novelty + Relevance + Clarity − Difficulty) decide which ideas are worth running.
+
 ## ✨ Features
 
 - **🤖 Multi-Agent Team** — 6 sub-agents (plan, research, code, debug, analyze, write) working in concert.
@@ -85,6 +95,21 @@ flowchart LR
 3. **Ideate** — `research-ideation` builds challenge-insight trees, generates anchor-first ideas, refines them in persona-driven tracks, and ranks them with an ELO tournament (Final = Novelty + Relevance + Clarity − Difficulty).
 4. **Execute** — `quant-experiment-runtime` discovers offline datasets under `code-repo/`, builds panels, runs a Research Artifact through its Python entry point, and evaluates IC / ICIR / RANKIC / coverage.
 5. **Evolve** — outcomes feed persistent memory, so the next cycle starts from what worked and avoids known dead ends.
+
+### 📄 Feeding the knowledge base
+
+The recommended way to use EvoQuant: **place your quant research report PDFs in the workspace's `rawpaper/` directory** before starting a research session.
+
+```text
+<workspace>/
+  rawpaper/     ← drop research report PDFs here
+  markdown/     ← auto-created: full-text markdown per report
+  wiki/         ← auto-created: structured JSONL knowledge records
+  manifest.jsonl
+```
+
+- `quant-paper-extractor` converts the corpus incrementally (`rawpaper/*.pdf` → `markdown/` → `wiki/*.jsonl`), tracked by `manifest.jsonl` — re-running only processes new files.
+- This local corpus is the **primary knowledge source of the autonomous research loop**: `research-ideation` grounds every idea in reports retrieved from it via `local-paper-navigator` — by design, generic web search is never used to find papers.
 
 ## 📦 Skills
 
