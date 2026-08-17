@@ -1,0 +1,13 @@
+{
+  "paperId": "<sha256-hex-of-pdf>",
+  "title": "<English title, max 30 words>",
+  "year": 0,
+  "source": "<English source name, max 10 words>",
+  "keywords": ["<keyword1>", "<keyword2>", "<keyword3>"],
+  "tldr": "<One-sentence core finding, max 40 words>",
+  "abstract": "<Concise summary, max 150 words>",
+  "strategy": "<Strategy description with evidence, max 300 words>",
+  "method": "<Methodology with evidence, max 300 words>",
+  "experiment": "<Experimental setup with evidence, max 300 words>",
+  "result": "<Key metrics with evidence, max 200 words>"
+}

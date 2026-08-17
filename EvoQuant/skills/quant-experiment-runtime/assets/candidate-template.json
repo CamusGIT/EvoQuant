@@ -1,0 +1,7 @@
+{
+  "id": "rev20_example",
+  "compute_ref": "<path-to-research-artifact-entry>::run",
+  "params": { "window": 20, "src_col": "ret" },
+  "metadata": { "object_type": "factor", "source": "example", "anchor_paper_id": null },
+  "_comment": "compute_ref is a Python-native Entry Point 'path/to/file.py::func' or 'pkg.mod:func'. For the bundled example artifact use a path resolvable from your cwd, e.g. 'EvoQuant/skills/quant-experiment-runtime/assets/research-artifact-example/factor.py::run'. The function name is whatever the artifact exposes (here 'run')."
+}

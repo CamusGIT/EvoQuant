@@ -1,0 +1,34 @@
+[project]
+name = "evoquant-skills"
+version = "1.0.0"
+description = "Shared environment dependencies for the EvoQuant Skills workspace"
+requires-python = ">=3.10"
+dependencies = [
+    # quant-paper-extractor: PDF -> structured JSONL
+    "pymupdf4llm>=0.0.20",
+    "pymupdf>=1.25.0",
+    "pypdf>=4.0.0",
+    # quant-experiment-runtime: offline panel build + IC metrics
+    "pandas>=2.0,<3",
+    "pyarrow>=14",
+    "numpy>=1.24,<2",
+    # nano-banana: Gemini image generation + PPTX packaging
+    "google-genai>=1.0",
+    "Pillow>=10.0",
+    "python-pptx>=0.6",
+    # paper-graph: DeepXiv arXiv search fallback (S2 works without it)
+    "deepxiv-sdk>=0.2",
+]
+
+[project.optional-dependencies]
+# Minimal set: only the quant research skills (paper extraction + experiment runtime).
+# Install the full set above when nano-banana / paper-graph are also needed.
+quant-only = [
+    "pymupdf4llm>=0.0.20",
+    "pymupdf>=1.25.0",
+    "pypdf>=4.0.0",
+    "pandas>=2.0,<3",
+    "pyarrow>=14",
+    "numpy>=1.24,<2",
+]
+

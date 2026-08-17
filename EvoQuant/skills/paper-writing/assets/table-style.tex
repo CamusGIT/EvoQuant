@@ -1,0 +1,85 @@
+% Table Style — Booktabs formatting with color highlighting macros
+% Usage: Include this file in your paper preamble with \input{table-style}
+
+% Required packages (include in your main .tex preamble if not already present):
+% \usepackage{booktabs}
+% \usepackage{xcolor}
+% \usepackage{colortbl}
+
+% ==============================================================================
+% Color Definitions
+% ==============================================================================
+
+% Highlight colors for best/second-best results
+\definecolor{bestred}{HTML}{FF0000}
+\definecolor{secondblue}{HTML}{0000FF}
+
+% Soft row shading (optional)
+\definecolor{rowgray}{gray}{0.95}
+
+% ==============================================================================
+% Result Highlighting Macros
+% ==============================================================================
+
+% \best{value} — Bold red for best result
+\newcommand{\best}[1]{\textcolor{bestred}{\textbf{#1}}}
+
+% \second{value} — Underlined blue for second-best result
+\newcommand{\second}[1]{\textcolor{secondblue}{\underline{#1}}}
+
+% \gain{value} — Green for improvement/gain values
+\definecolor{gaingreen}{HTML}{008000}
+\newcommand{\gain}[1]{\textcolor{gaingreen}{#1}}
+
+% ==============================================================================
+% Example: Comparison Table
+% ==============================================================================
+%
+% \begin{table}[t]
+% \centering
+% \caption{Quantitative comparison on [Dataset].
+%          \best{Red}: best, \second{blue}: second best.}
+% \label{tab:comparison}
+% \begin{tabular}{lccc}
+% \toprule
+% Method & PSNR $\uparrow$ & SSIM $\uparrow$ & LPIPS $\downarrow$ \\
+% \midrule
+% Baseline A~\cite{a}  & 28.34 & 0.912 & 0.087 \\
+% Baseline B~\cite{b}  & \second{29.12} & \second{0.934} & \second{0.065} \\
+% \midrule
+% Ours                  & \best{31.05} & \best{0.958} & \best{0.042} \\
+% \bottomrule
+% \end{tabular}
+% \end{table}
+%
+% ==============================================================================
+% Example: Ablation Table
+% ==============================================================================
+%
+% \begin{table}[t]
+% \centering
+% \caption{Ablation study on core components.}
+% \label{tab:ablation}
+% \begin{tabular}{lccc}
+% \toprule
+% Configuration & Metric 1 & Metric 2 & Metric 3 \\
+% \midrule
+% w/o Module A  & 27.8 & 0.89 & 0.102 \\
+% w/o Module B  & 29.1 & 0.92 & 0.078 \\
+% w/o Module C  & 28.5 & 0.91 & 0.085 \\
+% \midrule
+% Full model    & \best{31.1} & \best{0.96} & \best{0.042} \\
+% \bottomrule
+% \end{tabular}
+% \end{table}
+%
+% ==============================================================================
+% Guidelines (from paper-writing skill):
+% ==============================================================================
+% 1. Caption ABOVE the table
+% 2. NO vertical lines
+% 3. Use \toprule, \midrule, \bottomrule (booktabs)
+% 4. Minimize horizontal lines
+% 5. Add color to highlight best numbers
+% 6. Use arrows (↑/↓) to indicate metric direction
+% 7. Single-column tables look better in the right column

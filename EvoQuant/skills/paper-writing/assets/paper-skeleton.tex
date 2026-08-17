@@ -1,0 +1,138 @@
+% Paper Skeleton — Annotated LaTeX structure for academic papers
+% Usage: Copy this skeleton and fill in each section following the paper-writing skill guidelines.
+
+\documentclass{article}
+% Adapt the document class to your venue (e.g., \documentclass{cvpr}, \documentclass[review]{acl})
+
+\usepackage{booktabs}    % Professional table rules
+\usepackage{graphicx}    % Figures
+\usepackage{amsmath}     % Math
+\usepackage{hyperref}    % Hyperlinks
+\usepackage{xcolor}      % Color for highlights
+
+% Color macros for table highlights
+\definecolor{bestcolor}{HTML}{FF0000}
+\definecolor{secondcolor}{HTML}{0000FF}
+\newcommand{\best}[1]{\textcolor{bestcolor}{\textbf{#1}}}
+\newcommand{\second}[1]{\textcolor{secondcolor}{\underline{#1}}}
+
+\title{Your Paper Title}
+\author{Author Names}
+
+\begin{document}
+\maketitle
+
+% ==============================================================================
+% ABSTRACT (Step 9)
+% Answer: (1) Technical problem (2) Contribution (3) Why it works (4) Advantage
+% Templates: abstract-templates.md (Version 1/2/3)
+% ==============================================================================
+\begin{abstract}
+% Task. Technical challenge.
+% [Choose Version 1, 2, or 3 from abstract-templates.md]
+% Insight (if Version 2).
+% Technical contribution.
+% Benefits. Experiment summary.
+\end{abstract}
+
+% ==============================================================================
+% INTRODUCTION (Step 2)
+% Structure: Task → Previous methods → Challenge → Our pipeline → Advantages
+% Templates: introduction-templates.md
+% ==============================================================================
+\section{Introduction}
+\label{sec:intro}
+
+% Part 1: Introduce task and application
+% [Choose Version 1-4 from introduction-templates.md, Part 1]
+
+% Part 2: Previous methods and technical challenge
+% [Choose Version 1-3 from introduction-templates.md, Part 2]
+
+% Part 3: Our pipeline and contributions
+% [Choose Version 1-4 from introduction-templates.md, Part 3]
+% Anti-pattern: Do NOT write "naive solution → our improvement"
+
+% Contribution paragraph (typically bulleted or numbered):
+% Our contributions are summarized as follows:
+% \begin{itemize}
+%   \item We propose ... which ...
+%   \item We introduce ... that enables ...
+%   \item Extensive experiments demonstrate ...
+% \end{itemize}
+
+% ==============================================================================
+% RELATED WORK (Step 7)
+% Process: List papers → Group into topics → Write paragraphs
+% Guide: related-work-guide.md
+% ==============================================================================
+\section{Related Work}
+\label{sec:related}
+
+% \paragraph{Topic 1.} Survey + position our work.
+% \paragraph{Topic 2.} Survey + position our work.
+% \paragraph{Topic 3.} Survey + position our work.
+
+% ==============================================================================
+% METHOD (Step 3)
+% Each module: Motivation → Module Design → Technical Advantages
+% Templates: method-templates.md
+% ==============================================================================
+\section{Method}
+\label{sec:method}
+
+% Overview paragraph:
+% Setting (1-2 sentences) → Core contribution (1-2 sentences) → Pipeline figure reference → Section roadmap
+
+\subsection{Module 1}
+\label{sec:module1}
+% Motivation paragraph
+% Module design paragraph(s): structure + forward process
+% Technical advantages paragraph
+
+\subsection{Module 2}
+\label{sec:module2}
+% Motivation paragraph
+% Module design paragraph(s): structure + forward process
+% Technical advantages paragraph
+
+\subsection{Module 3}
+\label{sec:module3}
+% Motivation paragraph
+% Module design paragraph(s): structure + forward process
+% Technical advantages paragraph
+
+% ==============================================================================
+% EXPERIMENTS (Step 5)
+% Answer: (1) Better than existing? (2) Modules effective? (3) Upper limit?
+% Guide: experiments-guide.md
+% ==============================================================================
+\section{Experiments}
+\label{sec:exp}
+
+\subsection{Experimental Setup}
+% Datasets, evaluation metrics, implementation details, baselines
+
+\subsection{Comparison with State-of-the-Art Methods}
+% Quantitative table + qualitative figure + analysis
+
+\subsection{Ablation Study}
+% Part 1: Core contribution ablation (one big table)
+% Part 2: Module design choices (several small tables)
+
+\subsection{Applications}  % Optional but recommended
+% Demos on challenging data
+
+% ==============================================================================
+% CONCLUSION (Step 11)
+% Must include Limitation — reviewers flag its absence
+% ==============================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+% Summary of contributions and results.
+
+% Limitation: task/setting limitations (NOT technical defects).
+% Rule: "If not below SOTA metrics, it is not a technical defect."
+
+\end{document}

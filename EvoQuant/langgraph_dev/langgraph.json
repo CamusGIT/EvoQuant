@@ -1,0 +1,22 @@
+{
+    "dependencies": ["."],
+    "graphs": {
+        "EvoQuant": "EvoQuant.langgraph_dev.main_graph:EvoQuant_agent",
+        "writing-agent": "EvoQuant.langgraph_dev.graphs:writing_agent",
+        "data-analysis-agent": "EvoQuant.langgraph_dev.graphs:data_analysis_agent",
+        "scheduler": "EvoQuant.langgraph_dev.graphs:scheduler",
+        "evomemory-subagent-worker": "EvoQuant.langgraph_dev.graphs:evomemory_subagent_worker",
+        "evomemory-turn-worker": "EvoQuant.langgraph_dev.graphs:evomemory_turn_worker",
+        "evomemory-observation-linker": "EvoQuant.langgraph_dev.graphs:evomemory_observation_linker"
+    },
+    "checkpointer": {
+        "backend": "custom",
+        "path": "EvoQuant.sessions.create_checkpointer_for_langgraph_api"
+    },
+    "config": {
+        "recursion_limit": 1000000
+    },
+    "http": {
+        "app": "EvoQuant.langgraph_dev.http:app"
+    }
+}

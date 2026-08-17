@@ -1,0 +1,9 @@
+{
+  "dates": {
+    "train": ["2019-01-01", "2021-12-31"],
+    "val":   ["2022-01-01", "2023-12-31"],
+    "test":  ["2024-01-01", "2026-06-30"]
+  },
+  "include_test": true,
+  "_comment": "Reference explicit-dates example anchored to the current data coverage (2015-01 ~ 2026-06). This is a REFERENCE, not a Runtime default; the Runtime's default is ratio-derived from coverage. Pass via run_experiment.py --split-config."
+}

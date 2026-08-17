@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExperimentResult",
+  "type": "object",
+  "required": ["candidate_id", "status", "per_split", "metrics", "runtime_meta", "artifacts"],
+  "properties": {
+    "candidate_id": { "type": "string" },
+    "status": { "type": "string", "enum": ["ok", "error"] },
+    "per_split": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "date_range": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 2 },
+          "metrics": { "type": "object" },
+          "timing": { "type": "object" },
+          "error": { "type": "string" }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Headline flat metrics (val split's). For ic_panel: ic, icir, rank_ic, coverage, n_days, cs_pearson_autocorr, decile_mean_label, mls_fmb, label_col.",
+      "properties": {
+        "ic": { "type": ["number", "null"] },
+        "icir": { "type": ["number", "null"] },
+        "rank_ic": { "type": ["number", "null"] },
+        "coverage": { "type": ["number", "null"] }
+      }
+    },
+    "error": { "type": ["string", "null"] },
+    "runtime_meta": {
+      "type": "object",
+      "properties": {
+        "metric": { "type": "string" },
+        "splits": { "type": "array", "items": { "type": "string" } },
+        "label_col": { "type": "string" },
+        "object_type": { "type": ["string", "null"] },
+        "traceback": { "type": "string" }
+      }
+    },
+    "artifacts": { "type": "array", "items": { "type": "string" } }
+  }
+}

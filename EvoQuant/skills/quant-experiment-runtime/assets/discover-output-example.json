@@ -1,0 +1,20 @@
+{
+  "code_repo": "/code-repo",
+  "datasets": [
+    {
+      "name": "<dataset-folder-name>",
+      "root": "/code-repo/<dataset-folder-name>",
+      "manifest_path": "/code-repo/<dataset-folder-name>/MANIFEST.json",
+      "manifest": { "name": "<dataset-folder-name>", "generated": "<date>" },
+      "files": [
+        { "path": "artifacts/market/daily_hq.parquet", "bytes": 493915795, "num_rows": 6264507 },
+        { "path": "artifacts/fundamental/quarterly.parquet", "bytes": 131397354, "num_rows": 242983 },
+        { "path": "artifacts/fundamental/disclosure_calendar.parquet", "bytes": 6171623, "num_rows": 45 },
+        { "path": "artifacts/industry/sw_l1_membership.parquet", "bytes": 90746, "num_rows": 7666 },
+        { "path": "artifacts/index/000852_SH_members.parquet", "bytes": 75432, "num_rows": 89034 }
+      ],
+      "artifacts_root": "/code-repo/<dataset-folder-name>/artifacts"
+    }
+  ],
+  "_comment": "Structure example of discover_data.py output. The dataset folder name is whatever is actually under /code-repo/ (not fixed) — the agent reads this catalog and passes the chosen dataset's `root` to build_panel.py --data-root. Paths use the workdir-root notation (leading / = workdir root)."
+}

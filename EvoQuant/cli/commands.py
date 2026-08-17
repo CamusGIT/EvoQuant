@@ -1,0 +1,2349 @@
+"""Typer command registrations — onboard, config, mcp, main callback."""
+
+import asyncio
+import logging
+import os
+import queue
+import re
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from datetime import datetime
+from importlib.metadata import version as _pkg_version
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Any, cast
+
+import typer
+from rich.markup import escape
+from rich.table import Table
+
+from ..commands.base import ChannelRuntime, Command, CommandContext
+from ..gateway import (
+    GraphGateway,
+    GraphTarget,
+    RuntimeGateways,
+    create_runtime_gateways,
+)
+from ..llm.context_window import DEFAULT_CONTEXT_WINDOW_FALLBACK, resolve_context_window
+from ..paths import ensure_dirs, set_active_workspace, set_workspace_root
+from ..stream.console import console
+from . import async_notifier
+from ._app import app, channel_app, config_app, configure_app, mcp_app, sessions_app
+from ._constants import build_metadata
+from .agent import (
+    _create_session_workspace,
+    _deduplicate_run_name,
+    _load_agent,
+    _shorten_path,
+)
+from .channel import (
+    ChannelMessage,
+    _channel_message_cancel_scope,
+    _channels_stop,
+    _claim_or_complete_channel_request,
+    _complete_channel_request,
+    _message_queue,
+    _set_channel_response,
+    _start_channels_bus_mode,
+    channel_ask_user_prompt,
+    channel_hitl_prompt,
+    dispatch_channel_slash_command,
+    forget_channel_origin,
+    get_channel_origin,
+    publish_to_channel_origin,
+    remember_channel_origin,
+)
+from .mcp_ui import (
+    _mcp_add_server_from_kwargs,
+    _mcp_edit_server_fields,
+    _mcp_list_servers,
+    _mcp_remove_server,
+    _show_mcp_config,
+)
+
+if TYPE_CHECKING:
+    from langgraph.graph.state import CompiledStateGraph
+
+    from ..config import EvoQuantConfig
+
+# =============================================================================
+# Onboard command
+# =============================================================================
+
+
+@app.command()
+def onboard(
+    skip_validation: bool = typer.Option(
+        False, "--skip-validation", help="Skip API key validation during setup"
+    ),
+    # ---- Pre-fill answers (any subset; remaining prompts stay interactive)
+    provider: str | None = typer.Option(
+        None, "--provider", help="Pre-set LLM provider (e.g. anthropic, openai)"
+    ),
+    model: str | None = typer.Option(None, "--model", help="Pre-set model name"),
+    api_key: str | None = typer.Option(
+        None, "--api-key", help="Pre-set API key for the chosen --provider"
+    ),
+    tavily_key: str | None = typer.Option(
+        None, "--tavily-key", help="Pre-set Tavily API key"
+    ),
+    workspace_mode: str | None = typer.Option(
+        None,
+        "--workspace-mode",
+        help="Pre-set workspace mode (daemon | run)",
+    ),
+    show_thinking: bool | None = typer.Option(
+        None,
+        "--show-thinking/--no-show-thinking",
+        help="Pre-set thinking-panel visibility",
+    ),
+    ui: str | None = typer.Option(
+        None, "--ui", help="Pre-set UI backend (tui | cli | webui)"
+    ),
+    port: int | None = typer.Option(
+        None, "--port", help="Pre-set langgraph dev server port"
+    ),
+    # ---- Skip flags
+    skip_skills: bool = typer.Option(
+        False, "--skip-skills", help="Skip skills install"
+    ),
+    skip_mcp: bool = typer.Option(False, "--skip-mcp", help="Skip MCP server setup"),
+    skip_latex: bool = typer.Option(False, "--skip-latex", help="Skip LaTeX setup"),
+    skip_channels: bool = typer.Option(
+        False, "--skip-channels", help="Skip channels setup"
+    ),
+    non_interactive: bool = typer.Option(
+        False,
+        "--non-interactive",
+        help="Run without prompts — every required answer must come from a flag",
+    ),
+):
+    """Interactive setup wizard for EvoQuant.
+
+    Guides you through configuring API keys, model selection,
+    workspace settings, and agent parameters.
+
+    Any answer can be pre-set via a flag (``--provider anthropic
+    --model claude-sonnet-4-6 ...``); prompts for unset answers stay
+    interactive unless ``--non-interactive`` is passed, in which case any
+    missing required answer aborts the wizard.
+    """
+    from ..config.onboard.constants import (
+        VALID_PROVIDERS,
+        VALID_UI_BACKENDS,
+        VALID_WORKSPACE_MODES,
+    )
+    from ..config.onboard.prompter import NonInteractivePrompter
+
+    # Validate constrained string flags up-front so a typo doesn't silently
+    # poison the saved config. Allowed-value sets live in
+    # ``EvoQuant/config/onboard/constants.py``; a drift test in
+    # ``tests/test_onboard.py`` keeps them aligned with the interactive
+    # ``Choice(value=...)`` lists in ``steps.py``.
+    if ui is not None and ui not in VALID_UI_BACKENDS:
+        raise typer.BadParameter(
+            f"--ui must be one of {sorted(VALID_UI_BACKENDS)}", param_hint="--ui"
+        )
+    if workspace_mode is not None and workspace_mode not in VALID_WORKSPACE_MODES:
+        raise typer.BadParameter(
+            f"--workspace-mode must be one of {sorted(VALID_WORKSPACE_MODES)}",
+            param_hint="--workspace-mode",
+        )
+    if provider is not None and provider not in VALID_PROVIDERS:
+        raise typer.BadParameter(
+            f"--provider must be one of {sorted(VALID_PROVIDERS)}",
+            param_hint="--provider",
+        )
+    # Match the interactive prompt's range (1024 < port < 65536). Without
+    # this check, --port 80 or --port 99999 would land in config and break
+    # the langgraph dev server on startup.
+    if port is not None and not (1024 < port < 65536):
+        raise typer.BadParameter(
+            "--port must be in the user-port range (1025 — 65535)",
+            param_hint="--port",
+        )
+
+    # Collect flag-supplied answers keyed by the prompt_id wizard steps use.
+    answers: dict = {}
+    if ui is not None:
+        answers["ui"] = ui
+    if port is not None:
+        answers["port"] = str(port)
+    if provider is not None:
+        answers["provider"] = provider
+    if model is not None:
+        answers["model"] = model
+    if api_key is not None:
+        answers["api_key"] = api_key
+    if tavily_key is not None:
+        answers["tavily_key"] = tavily_key
+    if workspace_mode is not None:
+        answers["workspace_mode"] = workspace_mode
+    if show_thinking is not None:
+        answers["show_thinking"] = show_thinking
+
+    skip_set = {
+        section
+        for section, flag in (
+            ("skills", skip_skills),
+            ("mcp", skip_mcp),
+            ("latex", skip_latex),
+            ("channels", skip_channels),
+        )
+        if flag
+    }
+
+    prompter = None
+    if answers or skip_set or non_interactive:
+        prompter = NonInteractivePrompter(
+            answers=answers,
+            skip_set=skip_set,
+            strict=non_interactive,
+        )
+
+    _run_onboard_cli(skip_validation=skip_validation, prompter=prompter)
+
+
+# =============================================================================
+# `EvoQuant configure <section>` — re-run one onboarding section
+# =============================================================================
+
+
+_CONFIGURE_SECTIONS = {
+    "ui": "UI backend",
+    "port": "LangGraph server port",
+    "provider": "LLM provider + auth + API key",
+    "model": "Model + reasoning effort",
+    "tavily": "Tavily search key",
+    "workspace": "Workspace mode",
+    "thinking": "Thinking panel",
+    "skills": "Skills",
+    "mcp": "MCP servers",
+    "latex": "LaTeX (TinyTeX)",
+    "channels": "Channels",
+}
+
+
+def _run_onboard_cli(**kwargs: Any) -> None:
+    """Invoke the wizard, presenting non-interactive errors as a clean
+    message + exit code 1 instead of a raw Python traceback.
+
+    The wizard raises ``RuntimeError`` for *expected* non-interactive
+    failures: rejected ``--api-key`` / ``--tavily-key`` presets, missing
+    required flags under ``--non-interactive``, or a missing base URL.
+    Those are user-input problems, not bugs — surface them like any other
+    CLI validation error rather than dumping a stack trace.
+    """
+    from ..config import run_onboard
+
+    try:
+        run_onboard(**kwargs)
+    except RuntimeError as exc:
+        console.print(f"[red]✗ {escape(str(exc))}[/red]")
+        raise typer.Exit(code=1) from exc
+
+
+def _configure_section(section: str, skip_validation: bool = False) -> None:
+    """Run a single onboarding section, reusing the wizard's step logic."""
+    _run_onboard_cli(
+        skip_validation=skip_validation,
+        only_sections={section},
+    )
+
+
+@configure_app.command("ui")
+def configure_ui():
+    """Re-run UI backend (TUI / CLI) selection."""
+    _configure_section("ui")
+
+
+@configure_app.command("port")
+def configure_port():
+    """Re-run langgraph dev server port selection."""
+    _configure_section("port")
+
+
+@configure_app.command("provider")
+def configure_provider(
+    skip_validation: bool = typer.Option(False, "--skip-validation"),
+):
+    """Re-run LLM provider, auth mode, and API key prompts.
+
+    Model selection is automatically re-run after provider — the model list
+    depends on the provider, and silently leaving e.g. ``model="claude-...""``
+    when the provider was switched to ``openai`` would break the first
+    request. Press Enter on the model picker to keep the current default.
+    """
+    _run_onboard_cli(
+        skip_validation=skip_validation,
+        only_sections={"provider", "model"},
+    )
+
+
+@configure_app.command("model")
+def configure_model():
+    """Re-run model selection (and reasoning effort for OpenRouter)."""
+    _configure_section("model")
+
+
+@configure_app.command("tavily")
+def configure_tavily(
+    skip_validation: bool = typer.Option(False, "--skip-validation"),
+):
+    """Re-run Tavily search-key prompt."""
+    _configure_section("tavily", skip_validation=skip_validation)
+
+
+@configure_app.command("workspace")
+def configure_workspace():
+    """Re-run workspace mode (daemon/run) selection."""
+    _configure_section("workspace")
+
+
+@configure_app.command("thinking")
+def configure_thinking():
+    """Re-run thinking-panel visibility selection."""
+    _configure_section("thinking")
+
+
+@configure_app.command("skills")
+def configure_skills():
+    """Re-run skills install/sync."""
+    _configure_section("skills")
+
+
+@configure_app.command("mcp")
+def configure_mcp():
+    """Re-run MCP server selection."""
+    _configure_section("mcp")
+
+
+@configure_app.command("latex")
+def configure_latex():
+    """Re-run LaTeX (TinyTeX) setup."""
+    _configure_section("latex")
+
+
+@configure_app.command("channels")
+def configure_channels():
+    """Re-run channels selection and per-channel configuration."""
+    _configure_section("channels")
+
+
+# =============================================================================
+# Channel setup command
+# =============================================================================
+
+
+@channel_app.command("setup")
+def channel_setup():
+    """Interactive channel configuration wizard.
+
+    Guides you through selecting and configuring messaging channels
+    (Telegram, Discord, or iMessage).
+    """
+    import asyncio
+
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+    from ..config import load_config, save_config
+    from ..config.onboard.channels import _step_channels
+
+    config = load_config()
+    updates = _step_channels(config)
+    if updates:
+        for key, value in updates.items():
+            setattr(config, key, value)
+        save_config(config)
+        console.print("[green]Channel configuration saved.[/green]")
+    else:
+        console.print("[dim]No changes made.[/dim]")
+
+
+# =============================================================================
+# Compact helper
+# =============================================================================
+
+_COMPACT_CONTEXT_WINDOW_FALLBACK = DEFAULT_CONTEXT_WINDOW_FALLBACK
+_MANUAL_COMPACT_MIN_FRACTION = 0.40
+_MANUAL_COMPACT_MIN_PERCENT = int(_MANUAL_COMPACT_MIN_FRACTION * 100)
+
+
+class CompactResult:
+    """Structured result from compact_conversation.
+
+    Attributes:
+        status: "noop" (nothing to compact), "ok" (compacted), or "error".
+        message: Short human-readable message (used as fallback / TUI text).
+        messages_compacted: Number of messages summarized (0 for noop/error).
+        messages_kept: Number of messages unchanged.
+        tokens_before: Total tokens before compaction.
+        tokens_after: Total tokens after compaction.
+        tokens_summarized: Tokens in the summarized portion (before).
+        tokens_summary: Tokens in the summary message (after).
+        pct_decrease: Percentage decrease.
+        context_window: Model context window used for thresholding.
+        context_percent: Effective context utilization percent.
+        summary_text: Human-readable compact summary content for UI display.
+    """
+
+    __slots__ = (
+        "context_percent",
+        "context_window",
+        "message",
+        "messages_compacted",
+        "messages_kept",
+        "pct_decrease",
+        "status",
+        "summary_text",
+        "tokens_after",
+        "tokens_before",
+        "tokens_summarized",
+        "tokens_summary",
+    )
+
+    def __init__(
+        self,
+        status: str,
+        message: str,
+        *,
+        messages_compacted: int = 0,
+        messages_kept: int = 0,
+        tokens_before: int = 0,
+        tokens_after: int = 0,
+        tokens_summarized: int = 0,
+        tokens_summary: int = 0,
+        pct_decrease: int = 0,
+        context_window: int = 0,
+        context_percent: int = 0,
+        summary_text: str = "",
+    ):
+        self.status = status
+        self.message = message
+        self.messages_compacted = messages_compacted
+        self.messages_kept = messages_kept
+        self.tokens_before = tokens_before
+        self.tokens_after = tokens_after
+        self.tokens_summarized = tokens_summarized
+        self.tokens_summary = tokens_summary
+        self.pct_decrease = pct_decrease
+        self.context_window = context_window
+        self.context_percent = context_percent
+        self.summary_text = summary_text
+
+    def __str__(self) -> str:
+        return self.message
+
+
+class CompactSummaryRenderable:
+    """Rich renderable payload for the manual compact summary content."""
+
+    __slots__ = ("summary_text",)
+
+    def __init__(self, summary_text: str):
+        self.summary_text = (summary_text or "").strip()
+
+    def __rich_console__(self, console, options):
+        yield render_compact_summary_panel(self.summary_text)
+
+
+def _ensure_async_subagent_server(config: Any, *, workspace_dir: str) -> None:
+    """Start the langgraph dev subprocess for background agent work.
+
+    Shared by both the interactive entry and the serve entry so the
+    user-visible status message and workspace-mismatch handling stay in one
+    place.
+
+    Raises ``typer.Exit(1)`` (after surfacing a red error) when an
+    externally-managed langgraph dev is already running for a different
+    workspace — e.g., ``EvoQuant deploy --workdir /A`` is up and the user
+    is starting ``EvoQuant`` / ``EvoQuant serve`` in /B. Continuing in that
+    state would route async sub-agent calls to a process pinned to /A
+    while the main agent runs in /B.
+    """
+    from ..langgraph_dev.manager import WorkspaceMismatchError, ensure_langgraph_dev
+
+    try:
+        with console.status(
+            "[dim]Starting background agent server (langgraph dev)...[/dim]",
+            spinner="dots",
+        ):
+            ensure_langgraph_dev(config, workspace_dir=workspace_dir)
+    except WorkspaceMismatchError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+
+async def _sync_background_agent_server_workspace(
+    config: Any,
+    *,
+    workspace_dir: str,
+    status_message: str = (
+        "[dim]Syncing background agent server to resumed workspace...[/dim]"
+    ),
+) -> None:
+    """Sync langgraph dev to a resumed workspace for background agent work.
+
+    ``ensure_langgraph_dev`` is intentionally always called: EvoMemory
+    background workers require the server even when async subagents are disabled.
+    WorkspaceMismatchError is left for callers to handle according to their UI
+    flow.
+    """
+    import asyncio
+
+    from ..langgraph_dev.manager import ensure_langgraph_dev
+
+    with console.status(status_message, spinner="dots"):
+        await asyncio.to_thread(
+            ensure_langgraph_dev,
+            config,
+            workspace_dir=workspace_dir,
+        )
+
+
+def _resolve_context_window(
+    model: Any, fallback: int = _COMPACT_CONTEXT_WINDOW_FALLBACK
+) -> int:
+    """Resolve a model context window with a stable fallback."""
+    return resolve_context_window(model, fallback=fallback)
+
+
+def _percent_used(tokens: int, context_window: int) -> int:
+    """Return a clamped utilization percent."""
+    if context_window <= 0:
+        return 0
+    return max(0, min(100, round((tokens / context_window) * 100)))
+
+
+def render_compact_result(result: CompactResult):  # -> rich.text.Text
+    """Render a CompactResult as styled Rich Text.
+
+    Uses the same visual language as the token usage display:
+    cyan for numbers, green for savings, dim for labels.
+    """
+    from rich.text import Text
+
+    output = Text()
+
+    if result.status == "noop":
+        output.append("○ ", style="dim")
+        output.append("Manual compact not needed", style="dim")
+        if result.tokens_before > 0:
+            output.append("  [", style="dim")
+            output.append(f"{result.tokens_before:,}", style="cyan")
+            if result.context_window > 0:
+                output.append(" / ", style="dim")
+                output.append(f"{result.context_window:,}", style="cyan")
+                output.append(" tokens", style="dim")
+                output.append("  │  ", style="dim")
+                output.append(f"{result.context_percent}%", style="cyan")
+                output.append(" of window", style="dim")
+            else:
+                output.append(" tokens", style="dim")
+            output.append("]", style="dim")
+        if result.message:
+            output.append("\n  ", style="")
+            output.append(result.message, style="dim")
+        return output
+
+    if result.status == "error":
+        output.append("✗ ", style="red")
+        output.append(result.message, style="red")
+        return output
+
+    # status == "ok"
+    output.append("✓ ", style="green")
+    output.append("Compacted ", style="dim")
+    output.append(f"{result.messages_compacted}", style="bold")
+    output.append(" messages", style="dim")
+    output.append("  [", style="dim")
+    output.append(f"{result.tokens_before:,}", style="cyan")
+    output.append(" → ", style="dim")
+    output.append(f"{result.tokens_after:,}", style="green")
+    output.append(" tokens", style="dim")
+    output.append(f"  ↓{result.pct_decrease}%", style="green bold")
+    output.append("]", style="dim")
+
+    # Second line: detail breakdown
+    output.append("\n  ", style="")
+    output.append("Summarized: ", style="dim")
+    output.append(f"{result.tokens_summarized:,}", style="cyan")
+    output.append(" → ", style="dim")
+    output.append(f"{result.tokens_summary:,}", style="green")
+    output.append("  │  ", style="dim")
+    output.append("Kept: ", style="dim")
+    output.append(f"{result.messages_kept}", style="cyan")
+    output.append(" messages unchanged", style="dim")
+    if result.context_window > 0:
+        output.append("  │  ", style="dim")
+        output.append("Window: ", style="dim")
+        output.append(f"{result.context_percent}%", style="cyan")
+        output.append(" used", style="dim")
+
+    return output
+
+
+def render_compact_summary_panel(summary_text: str):
+    """Render the compacted summary content as a Rich panel."""
+    from rich.panel import Panel
+    from rich.text import Text
+
+    content = (summary_text or "").strip()
+    body = Text(content or "(empty summary)", style="dim italic")
+    return Panel(
+        body,
+        title="Context Compacted",
+        border_style="#f59e0b",
+        padding=(0, 1),
+    )
+
+
+def build_compact_summary_renderable(
+    result: CompactResult,
+) -> CompactSummaryRenderable | None:
+    """Build the UI summary payload for a successful compact operation."""
+    if result.status != "ok" or not result.summary_text.strip():
+        return None
+    return CompactSummaryRenderable(result.summary_text)
+
+
+async def compact_conversation(
+    graph_gateway: GraphGateway,
+    thread_id: str,
+    target: GraphTarget,
+    *,
+    input_tokens_hint: int | None = None,
+) -> CompactResult:
+    """Compact the conversation by summarizing old messages.
+
+    Reads the graph's checkpointed state, creates a temporary
+    ``SummarizationMiddleware``, generates a summary, and writes
+    the compacted state back through ``GraphGateway``.
+
+    ``input_tokens_hint`` is the real LLM input token count from the last
+    ``usage_metadata`` (includes system prompt + tool schemas).  When
+    provided it is used for the display values in ``CompactResult`` so the
+    panel stays in sync with the status bar; the internal compact logic
+    (cutoff determination) still uses message-level token counts.
+
+    Returns a structured ``CompactResult``.
+    """
+    from langchain_core.messages.utils import count_tokens_approximately
+    from langchain_core.runnables import RunnableConfig
+
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+
+    try:
+        state_values = await graph_gateway.get_state_values(target, thread_id)
+    except Exception as exc:
+        return CompactResult("error", f"Failed to read state: {exc}")
+
+    messages = state_values.get("messages", [])
+    if not messages:
+        return CompactResult(
+            "noop", "Nothing to compact — no messages in conversation."
+        )
+
+    from deepagents.middleware.summarization import (
+        SummarizationEvent,
+        SummarizationMiddleware,
+        compute_summarization_defaults,
+    )
+
+    from ..EvoQuant import _ensure_chat_model, _get_default_backend
+
+    try:
+        model = _ensure_chat_model()
+    except Exception as exc:
+        return CompactResult(
+            "error", f"Compaction requires a working model configuration: {exc}"
+        )
+
+    backend = _get_default_backend()
+    context_window = _resolve_context_window(model)
+
+    defaults = compute_summarization_defaults(model)
+    middleware = SummarizationMiddleware(
+        model=model,
+        backend=backend,
+        keep=defaults["keep"],
+        trim_tokens_to_summarize=None,
+    )
+
+    # Rebuild effective message list accounting for prior compaction
+    event = state_values.get("_summarization_event")
+    effective = middleware._apply_event_to_messages(messages, event)
+    effective_tokens = count_tokens_approximately(effective)
+
+    # For display and threshold we prefer the real LLM input token count
+    # (includes system prompt + tool schemas) so the panel stays in sync with
+    # the status bar.  The internal compact logic (cutoff, partition, savings)
+    # still uses effective_tokens (message-level) because compact only reduces
+    # messages, not the constant system/tool overhead.
+    display_tokens = (
+        input_tokens_hint
+        if input_tokens_hint is not None and input_tokens_hint > 0
+        else effective_tokens
+    )
+    display_percent = _percent_used(display_tokens, context_window)
+
+    if display_percent < _MANUAL_COMPACT_MIN_PERCENT:
+        return CompactResult(
+            "noop",
+            "Conversation is below the manual compact threshold "
+            f"({display_percent}% < {_MANUAL_COMPACT_MIN_PERCENT}%).",
+            tokens_before=display_tokens,
+            context_window=context_window,
+            context_percent=display_percent,
+        )
+
+    cutoff = middleware._determine_cutoff_index(effective)
+    if cutoff == 0:
+        return CompactResult(
+            "noop",
+            f"Conversation (~{display_tokens:,} tokens) is within the retention budget.",
+            tokens_before=display_tokens,
+            context_window=context_window,
+            context_percent=display_percent,
+        )
+
+    to_summarize, to_keep = middleware._partition_messages(effective, cutoff)
+
+    tokens_summarized = count_tokens_approximately(to_summarize)
+    tokens_kept = count_tokens_approximately(to_keep)
+    tokens_before = tokens_summarized + tokens_kept
+
+    # Skip if savings would be negligible — compacting ≤2 messages with
+    # <2% of total tokens prevents the infinite 1-message-at-a-time loop
+    # that occurs when the conversation sits just above the keep budget.
+    _MIN_COMPACT_MESSAGES = 3
+    _MIN_COMPACT_TOKEN_FRACTION = 0.02
+    if (
+        len(to_summarize) < _MIN_COMPACT_MESSAGES
+        and tokens_summarized < tokens_before * _MIN_COMPACT_TOKEN_FRACTION
+    ):
+        return CompactResult(
+            "noop",
+            f"Nothing to compact — only {len(to_summarize)} message(s) "
+            f"({tokens_summarized:,} tokens) would be summarized, "
+            f"not worth the overhead.",
+            tokens_before=display_tokens,
+            context_window=context_window,
+            context_percent=display_percent,
+        )
+
+    # Generate summary (LLM call)
+    summary = await middleware._acreate_summary(to_summarize)
+
+    # Inject thread_id into LangGraph contextvar so _get_thread_id() finds it
+    # (compact runs outside a runnable context, so get_config() would fail
+    # and the middleware would generate a random "session_xxx" filename instead
+    # of reusing the real thread_id).
+    from langgraph.config import var_child_runnable_config
+
+    _token = var_child_runnable_config.set(config)
+
+    # Offload old messages to backend
+    file_path: str | None = None
+    try:
+        file_path = await middleware._aoffload_to_backend(backend, to_summarize)
+    except Exception:
+        pass  # non-fatal — proceed without offloaded history
+    finally:
+        var_child_runnable_config.reset(_token)
+
+    from langchain_core.messages import HumanMessage
+
+    summary_msg = cast(
+        HumanMessage,
+        middleware._build_new_messages_with_path(summary, file_path)[0],
+    )
+
+    # Compute token savings (message-level, used for pct calculation)
+    tokens_summary = count_tokens_approximately([summary_msg])
+    tokens_after = tokens_summary + tokens_kept
+    pct = (
+        round((tokens_before - tokens_after) / tokens_before * 100)
+        if tokens_before > 0
+        else 0
+    )
+
+    # Adjust display totals: preserve real overhead (system + tools) by
+    # offsetting from input_tokens_hint rather than using bare message counts.
+    msg_reduction = tokens_before - tokens_after  # how many message tokens saved
+    display_before = display_tokens
+    display_after = max(0, display_tokens - msg_reduction)
+    display_after_percent = _percent_used(display_after, context_window)
+
+    # Append savings note to summary message for model awareness
+    savings_note = (
+        f"\n\n{len(to_summarize)} messages were compacted "
+        f"({tokens_summarized:,} → {tokens_summary:,} tokens). "
+        f"Total context: {display_before:,} → {display_after:,} tokens "
+        f"({pct}% decrease), "
+        f"{len(to_keep)} messages unchanged."
+    )
+    summary_msg.content += savings_note
+
+    state_cutoff = middleware._compute_state_cutoff(event, cutoff)
+
+    new_event: SummarizationEvent = {
+        "cutoff_index": state_cutoff,
+        "summary_message": summary_msg,
+        "file_path": file_path,
+    }
+
+    await graph_gateway.update_state_values(
+        target,
+        thread_id,
+        {"_summarization_event": new_event},
+    )
+
+    return CompactResult(
+        "ok",
+        f"Compacted {len(to_summarize)} messages "
+        f"({display_before:,} → {display_after:,} tokens, {pct}% decrease)",
+        messages_compacted=len(to_summarize),
+        messages_kept=len(to_keep),
+        tokens_before=display_before,
+        tokens_after=display_after,
+        tokens_summarized=tokens_summarized,
+        tokens_summary=tokens_summary,
+        pct_decrease=pct,
+        context_window=context_window,
+        context_percent=display_after_percent,
+        summary_text=summary,
+    )
+
+
+# =============================================================================
+# Serve helpers
+# =============================================================================
+
+_serve_logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class ServeRuntimeState:
+    """Mutable serve-mode runtime shared by the poll loop and slash callbacks."""
+
+    agent: "CompiledStateGraph"
+    thread_id: str
+    workspace_dir: str | None
+    config: "EvoQuantConfig | None"
+    runtime_gateways: RuntimeGateways
+    resume_warning_thread_id: str | None = None
+
+    def set_agent(
+        self,
+        agent: "CompiledStateGraph",
+        channel_runtime: ChannelRuntime | None,
+    ) -> None:
+        self.agent = agent
+        if channel_runtime is not None:
+            channel_runtime.agent = agent
+
+    def set_thread_id(
+        self,
+        thread_id: str,
+        channel_runtime: ChannelRuntime | None,
+        *,
+        forget_previous_origin: bool = True,
+    ) -> None:
+        old_thread_id = self.thread_id
+        if forget_previous_origin:
+            forget_channel_origin(old_thread_id)
+        self.thread_id = thread_id
+        if channel_runtime is not None:
+            channel_runtime.thread_id = thread_id
+
+
+def _make_serve_start_new_session_cb(
+    runtime_state: ServeRuntimeState,
+    channel_runtime: ChannelRuntime | None = None,
+):
+    """Build the ``start_new_session_cb`` used by serve mode.
+
+    ``/new`` delegates session rotation entirely to this callback: it
+    does not mutate ``ctx.thread_id`` itself, it just calls
+    ``ctx.ui.start_new_session()`` and expects the surface to issue a
+    fresh thread id.  Without a wired callback the channel user gets
+    ``ChannelCommandUI``'s fallback "restart the channel link" message
+    and nothing actually rotates.  This helper generates a new thread
+    id, updates the shared runtime state, and syncs the channel runtime so
+    subsequent messages land on the new thread.
+    """
+
+    async def _cb() -> None:
+        new_tid = await runtime_state.runtime_gateways.graph_gateway.create_thread(
+            GraphTarget(workspace_dir=runtime_state.workspace_dir)
+        )
+        runtime_state.set_thread_id(new_tid, channel_runtime)
+        console.print(f"[dim][serve] New thread: {new_tid}[/dim]")
+
+    return _cb
+
+
+def _serve_resume_config(
+    runtime_state: ServeRuntimeState,
+    config: "EvoQuantConfig | None",
+) -> "EvoQuantConfig | None":
+    """Return the effective config to use for serve-mode resume sync."""
+    return config if config is not None else runtime_state.config
+
+
+async def _apply_serve_resume_state(
+    runtime_state: ServeRuntimeState,
+    channel_runtime: ChannelRuntime | None,
+    *,
+    thread_id: str,
+    workspace_dir: str | None,
+    config: "EvoQuantConfig | None" = None,
+) -> None:
+    """Adopt a resumed thread/workspace into serve-mode runtime state.
+
+    Workspace-bound resources are rebuilt and synced before mutating the shared
+    state. The agent is loaded before syncing the external server so a load
+    failure cannot move the server away from the currently active session.
+    """
+    import asyncio
+
+    old_workspace = runtime_state.workspace_dir
+    new_workspace = (
+        workspace_dir if workspace_dir and workspace_dir != old_workspace else None
+    )
+    workspace_update: tuple[str, CompiledStateGraph] | None = None
+
+    if new_workspace is not None:
+        effective_config = _serve_resume_config(runtime_state, config)
+        if effective_config is None:
+            raise RuntimeError(
+                "Cannot resume into a different workspace in serve mode without "
+                "the effective configuration."
+            )
+        try:
+            new_agent = await asyncio.to_thread(
+                _load_agent,
+                workspace_dir=new_workspace,
+                config=effective_config,
+            )
+            await _sync_background_agent_server_workspace(
+                effective_config,
+                workspace_dir=new_workspace,
+            )
+            workspace_update = (new_workspace, new_agent)
+        except Exception:
+            if old_workspace:
+                set_active_workspace(old_workspace)
+            raise
+
+    old_thread_id = runtime_state.thread_id
+    thread_changed = thread_id != old_thread_id
+    if thread_changed:
+        runtime_state.set_thread_id(thread_id, channel_runtime)
+
+    if workspace_update is not None:
+        updated_workspace, updated_agent = workspace_update
+        runtime_state.workspace_dir = updated_workspace
+        runtime_state.set_agent(updated_agent, channel_runtime)
+
+
+def _make_serve_handle_session_resume_cb(
+    runtime_state: ServeRuntimeState,
+    channel_runtime: ChannelRuntime | None = None,
+    *,
+    config: "EvoQuantConfig | None" = None,
+):
+    """Build the ChannelCommandUI resume callback for serve mode."""
+
+    async def _cb(thread_id: str, workspace_dir: str | None = None) -> None:
+        old_thread_id = runtime_state.thread_id
+        await _apply_serve_resume_state(
+            runtime_state,
+            channel_runtime,
+            thread_id=thread_id,
+            workspace_dir=workspace_dir,
+            config=config,
+        )
+        if thread_id != old_thread_id:
+            runtime_state.resume_warning_thread_id = thread_id
+
+    return _cb
+
+
+def _make_serve_cmd_completed_hook(
+    runtime_state: ServeRuntimeState,
+    channel_runtime: ChannelRuntime | None = None,
+    *,
+    config: "EvoQuantConfig | None" = None,
+):
+    """Build the ``on_cmd_completed`` hook used by serve mode.
+
+    Adopts ``/model`` agent swaps and ``/resume`` thread/workspace
+    swaps back into ``runtime_state`` so the outer poll loop picks up
+    the new handles on subsequent messages.  Also keeps
+    ``channel_runtime`` in sync so the bus sees the new values.
+
+    For ``/resume`` specifically, surface a user-visible warning via
+    ``ctx.ui``: serve uses ``InMemorySaver`` (not the SQLite
+    checkpointer the interactive CLI uses), so historical state for
+    any persisted thread is not available — the resumed thread will
+    start fresh.  Without this the ``/resume`` command appears to
+    succeed silently from the channel user's POV.
+
+    Extracted from ``_serve_process_message`` so it can be unit tested
+    without spinning up the whole serve loop.
+    """
+
+    async def _hook(
+        ctx: CommandContext,
+        original_agent: "CompiledStateGraph",
+        cmd: Command,
+    ) -> None:
+        if ctx.agent is not None and ctx.agent is not original_agent:
+            runtime_state.set_agent(ctx.agent, channel_runtime)
+
+        old_thread_id = runtime_state.thread_id
+        resume_warning_thread_id = runtime_state.resume_warning_thread_id
+        runtime_state.resume_warning_thread_id = None
+
+        # ``/resume`` mutates ``ctx.thread_id`` directly (its UI callback
+        # is a no-op in serve mode since there's no REPL to reset).  Pick
+        # up the new id here so subsequent messages run on the resumed
+        # thread instead of the one captured at serve startup.  A bare
+        # ``/resume`` with no argument just prints usage and leaves
+        # ``ctx.thread_id`` unchanged — ``thread_changed`` gates both
+        # the adoption and the user-facing warning so neither fires in
+        # that case.
+        new_tid = ctx.thread_id
+        if cmd.name == "/resume":
+            await _apply_serve_resume_state(
+                runtime_state,
+                channel_runtime,
+                thread_id=new_tid,
+                workspace_dir=ctx.workspace_dir,
+                config=config,
+            )
+        else:
+            thread_changed = new_tid != old_thread_id
+            if thread_changed:
+                runtime_state.set_thread_id(new_tid, channel_runtime)
+
+        thread_changed = new_tid != old_thread_id
+
+        # Surface the in-memory-state limitation to the channel user
+        # for ``/resume`` so the missing history isn't silent.  Flush
+        # is required because ``cmd_manager.execute`` already flushed
+        # the command's own output before calling this hook.
+        if cmd.name == "/resume" and (
+            thread_changed or resume_warning_thread_id == new_tid
+        ):
+            try:
+                ctx.ui.append_system(
+                    "Note: serve mode uses in-memory state — "
+                    f"thread {new_tid[:8]} starts without prior history.",
+                    style="yellow",
+                )
+                await ctx.ui.flush()
+            except Exception:  # pragma: no cover — defensive
+                pass
+
+    return _hook
+
+
+def _serve_process_message(
+    msg: ChannelMessage,
+    *,
+    runtime_state: ServeRuntimeState,
+    model: str | None,
+    workspace_dir: str,
+    show_thinking: bool,
+    on_cmd_completed: Callable[..., Awaitable[None]] | None = None,
+    handle_session_resume_cb: Callable[..., Awaitable[None]] | None = None,
+    start_new_session_cb: Callable[[], Awaitable[None]] | None = None,
+    channel_runtime: ChannelRuntime | None = None,
+) -> None:
+    """Process a single channel message in headless serve mode.
+
+    Headless equivalent of interactive.py's ``_process_channel_message``.
+    No CLI prompt manipulation — just log lines for monitoring.
+
+    ``runtime_state`` is shared with the outer ``serve()`` loop.
+    ``on_cmd_completed`` (the agent-swap / session-adoption hook) and
+    ``start_new_session_cb`` (thread rotation for ``/new``) are
+    constructed once in ``serve()`` — if omitted, they're rebuilt per
+    message (backward compat for existing tests).  ``/resume`` lands
+    via the ``on_cmd_completed`` hook because the command mutates
+    ``ctx.thread_id`` / ``ctx.workspace_dir`` directly.
+    """
+    import asyncio
+
+    from .channel import _bus_loop
+    from .tui_runtime import run_streaming
+
+    runtime_gateways = runtime_state.runtime_gateways
+
+    if not _claim_or_complete_channel_request(msg):
+        return
+
+    remember_channel_origin(runtime_state.thread_id, msg)
+
+    runtime_workspace = runtime_state.workspace_dir or workspace_dir
+
+    console.print(
+        f"[dim][{msg.channel_type}] {msg.sender}: {escape(msg.content[:80])}[/dim]"
+    )
+
+    # -- channel callback helpers (same pattern as interactive.py) --
+
+    def _send_to_channel(coro, label: str, timeout: int = 15) -> None:
+        loop = _bus_loop
+        if not loop:
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(coro, loop).result(timeout=timeout)
+        except Exception as e:
+            _serve_logger.debug(f"{label} send failed: {e}")
+
+    def _send_thinking(thinking: str) -> None:
+        ch = msg.channel_ref
+        if ch and ch.send_thinking:
+            _send_to_channel(
+                ch.send_thinking_message(
+                    sender=msg.chat_id,
+                    thinking=thinking,
+                    metadata=msg.metadata,
+                ),
+                "Thinking",
+            )
+
+    def _send_todo(items: list[dict]) -> None:
+        from ..channels.consumer import _format_todo_list
+
+        if msg.channel_ref:
+            _send_to_channel(
+                msg.channel_ref.send_todo_message(
+                    sender=msg.chat_id,
+                    content=_format_todo_list(items),
+                    metadata=msg.metadata,
+                ),
+                "Todo",
+            )
+
+    def _send_media(file_path: str) -> None:
+        if msg.channel_ref:
+            _send_to_channel(
+                msg.channel_ref.send_media(
+                    recipient=msg.chat_id,
+                    file_path=file_path,
+                    metadata=msg.metadata,
+                ),
+                "Media",
+                timeout=30,
+            )
+
+    def _hitl_prompt(action_requests: list) -> list[dict] | None:
+        return channel_hitl_prompt(action_requests, msg)
+
+    def _ask_user_prompt(ask_user_data: dict) -> dict:
+        return channel_ask_user_prompt(ask_user_data, msg)
+
+    # ---- Slash command dispatch (cmd_manager, not the agent) ----
+    # Headless equivalent of the Rich CLI / TUI slash branch so channel
+    # commands like ``/evoskills`` actually execute in serve mode instead
+    # of being fed to the LLM as a plain prompt.  ``await_agent_ready`` is
+    # None because the agent is always loaded before the serve loop polls.
+    # Uses a dedicated event loop (not ``asyncio.run``) so SIGINT handling
+    # installed by ``serve()`` remains authoritative — ``asyncio.run``
+    # swaps ``signal.set_wakeup_fd`` and can leave it dangling on edge
+    # cases, which breaks Ctrl+C between messages.
+    # ``set_event_loop`` is needed because some downstream commands
+    # (e.g. ``/install-mcp``) call ``asyncio.get_event_loop()``, which
+    # raises ``RuntimeError`` on Python 3.12+ when the thread has no
+    # current loop set.  The prior loop (often ``None``) is restored in
+    # the ``finally`` below so subsequent messages start from a clean
+    # slate.  Loop creation lives inside the try so an exception between
+    # creation and ``set_event_loop`` still closes the loop.
+    try:
+        _prev_loop: asyncio.AbstractEventLoop | None
+        try:
+            _prev_loop = asyncio.get_event_loop_policy().get_event_loop()
+        except RuntimeError:
+            _prev_loop = None
+        _slash_loop: asyncio.AbstractEventLoop | None = None
+        _slash_handled = False
+        _slash_error: Exception | None = None
+        try:
+            _slash_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(_slash_loop)
+            _slash_handled = _slash_loop.run_until_complete(
+                dispatch_channel_slash_command(
+                    msg,
+                    agent=runtime_state.agent,
+                    thread_id=runtime_state.thread_id,
+                    workspace_dir=runtime_workspace,
+                    checkpointer=None,
+                    append_system=lambda t, s="dim": console.print(t, style=s),
+                    start_new_session_cb=start_new_session_cb
+                    or _make_serve_start_new_session_cb(
+                        runtime_state,
+                        channel_runtime,
+                    ),
+                    handle_session_resume_cb=handle_session_resume_cb
+                    or _make_serve_handle_session_resume_cb(
+                        runtime_state,
+                        channel_runtime,
+                    ),
+                    on_cmd_completed=on_cmd_completed
+                    or _make_serve_cmd_completed_hook(
+                        runtime_state,
+                        channel_runtime,
+                        config=runtime_state.config,
+                    ),
+                    channel_runtime=channel_runtime,
+                    graph_gateway=runtime_gateways.graph_gateway,
+                )
+            )
+        except Exception as exc:
+            _slash_error = exc
+            _serve_logger.exception("Slash dispatch failed for %s", msg.channel_type)
+        finally:
+            if _slash_loop is not None:
+                _slash_loop.close()
+            asyncio.set_event_loop(_prev_loop)
+
+        if _slash_error is not None:
+            _set_channel_response(msg.msg_id, f"Command error: {_slash_error}")
+            console.print(
+                f"[red]Slash command error: {escape(str(_slash_error))}[/red]"
+            )
+            return
+
+        if _slash_handled:
+            # A channel-issued /new or /resume rotates the thread inside the
+            # dispatch above; re-bind the now-current thread to this channel
+            # so async-notifier turns on it still forward back here.
+            remember_channel_origin(runtime_state.thread_id, msg)
+            console.print(f"[dim][{msg.channel_type}] Replied to {msg.sender}[/dim]")
+            return
+
+        meta = build_metadata(runtime_workspace, model)
+        try:
+            response = run_streaming(
+                ui_backend="cli",
+                agent=runtime_state.agent,
+                message=msg.content,
+                thread_id=runtime_state.thread_id,
+                show_thinking=show_thinking,
+                interactive=True,
+                metadata=meta,
+                on_thinking=_send_thinking,
+                on_todo=_send_todo,
+                on_file_write=_send_media,
+                hitl_prompt_fn=_hitl_prompt,
+                ask_user_prompt_fn=_ask_user_prompt,
+                cancel_scope=_channel_message_cancel_scope(msg),
+                gateway=runtime_gateways.graph_gateway,
+            )
+        except Exception as e:
+            response = f"Error: {e}"
+            console.print(f"[red]Serve error: {e}[/red]")
+
+        _set_channel_response(msg.msg_id, response)
+        console.print(f"[dim][{msg.channel_type}] Replied to {msg.sender}[/dim]")
+    finally:
+        _complete_channel_request(msg.msg_id)
+
+
+# =============================================================================
+# Serve command (headless mode)
+# =============================================================================
+
+
+def _serve_drain_notifications(
+    *,
+    runtime_state: ServeRuntimeState,
+    model: str | None,
+    workspace_dir: str,
+    show_thinking: bool,
+) -> None:
+    """Drain the async-task notification queue in headless serve mode.
+
+    Mirrors the Rich CLI's ``_check_channel_queue`` notification path.
+    Uses a dedicated event loop (same pattern as serve mode's slash dispatch).
+    """
+    import asyncio as _aio
+
+    from .tui_runtime import run_streaming
+
+    def _run_notification_message(text: str, notifs: list) -> None:
+        """Synchronous wrapper: run the agent on the synthetic notification text."""
+        # Render the per-task visual frame (matches CLI/TUI aesthetic).
+        from EvoQuant.cli.async_notifier import format_notification_lines
+
+        for line_text, line_style in format_notification_lines(notifs):
+            console.print(line_text, style=line_style, markup=False)
+        # Use the current workspace from runtime_state (updated by /resume's
+        # session-rebind callback), falling back to the startup value.
+        runtime_workspace = runtime_state.workspace_dir or workspace_dir
+        meta = build_metadata(runtime_workspace, model)
+        tid = runtime_state.thread_id
+        try:
+            response = run_streaming(
+                ui_backend="cli",
+                agent=runtime_state.agent,
+                message=text,
+                thread_id=tid,
+                show_thinking=show_thinking,
+                interactive=True,
+                metadata=meta,
+                gateway=runtime_state.runtime_gateways.graph_gateway,
+            )
+        except Exception as exc:
+            _serve_logger.warning("Notification agent turn failed: %s", exc)
+            return
+        if publish_to_channel_origin(tid, response or ""):
+            # Mirror a normal channel turn's closing "Replied to" line so the
+            # forwarded notification reads as terminated in the serve log.
+            origin = get_channel_origin(tid)
+            if origin is not None:
+                console.print(
+                    f"[dim][{origin.channel_type}] Replied to "
+                    f"{origin.sender or origin.chat_id}[/dim]"
+                )
+
+    async def _run_notification_message_async(text: str, notifs: list) -> None:
+        await _aio.to_thread(_run_notification_message, text, notifs)
+
+    async def _read_async_tasks() -> async_notifier.AsyncTasksState:
+        thread_id = runtime_state.thread_id
+        if not thread_id:
+            return {}
+        return await async_notifier.read_async_tasks_from_gateway(
+            runtime_state.runtime_gateways.graph_gateway,
+            GraphTarget(
+                local_graph=runtime_state.agent,
+                workspace_dir=runtime_state.workspace_dir,
+            ),
+            thread_id,
+        )
+
+    async def _consume() -> None:
+        await async_notifier.consume_notifications(
+            run_message=_run_notification_message_async,
+            read_async_tasks_state=_read_async_tasks,
+            current_thread_id=runtime_state.thread_id,
+        )
+
+    _notif_loop: _aio.AbstractEventLoop | None = None
+    try:
+        _notif_loop = _aio.new_event_loop()
+        _notif_loop.run_until_complete(_consume())
+    except Exception as exc:
+        _serve_logger.warning("Notification drain failed: %s", exc)
+    finally:
+        if _notif_loop is not None:
+            _notif_loop.close()
+
+
+@app.command()
+def serve(
+    no_thinking: bool = typer.Option(
+        False, "--no-thinking", help="Disable thinking relay to channels"
+    ),
+    workdir: str | None = typer.Option(
+        None, "--workdir", help="Override workspace directory"
+    ),
+    auto_approve: bool = typer.Option(
+        False,
+        "--auto-approve",
+        help="Skip tool approval prompts for HITL actions",
+    ),
+    auto_mode: bool = typer.Option(
+        False,
+        "--auto-mode",
+        help="Run unattended: skip ask_user and tool approval prompts",
+    ),
+    ask_user: bool = typer.Option(
+        False,
+        "--ask-user",
+        help="Enable agent to ask clarifying questions about your research preferences",
+    ),
+    dangerous: bool = typer.Option(
+        False,
+        "--dangerous",
+        help="DANGEROUS: real-filesystem access (no workspace confinement); implies --auto-approve",
+    ),
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        help="Enable debug logging and channel trace output in serve mode",
+    ),
+):
+    """Run EvoQuant in headless mode -- channels only, no interactive prompt.
+
+    Starts all configured channels and processes messages via the agent.
+    Press Ctrl+C to shut down.
+    """
+    from ..config import apply_config_to_env, get_effective_config
+
+    cli_overrides = {}
+    if auto_approve:
+        cli_overrides["auto_approve"] = True
+    if auto_mode:
+        cli_overrides["auto_mode"] = True
+        cli_overrides["auto_approve"] = True
+        cli_overrides["enable_ask_user"] = False
+    elif ask_user:
+        cli_overrides["enable_ask_user"] = True
+    if dangerous:
+        cli_overrides["dangerous_mode"] = True
+    if debug:
+        cli_overrides["log_level"] = "DEBUG"
+        cli_overrides["channel_debug_tracing"] = True
+    config = get_effective_config(cli_overrides)
+    if debug:
+        os.environ["EVOSCIENTIST_LOG_LEVEL"] = "DEBUG"
+        os.environ["EVOSCIENTIST_CHANNEL_DEBUG_TRACING"] = "true"
+    apply_config_to_env(config)
+    if debug:
+        _configure_logging()
+
+    # Auto-start ccproxy if any provider uses OAuth mode
+    _ccproxy_proc_serve = None
+    if config.anthropic_auth_mode == "oauth" or config.openai_auth_mode == "oauth":
+        try:
+            from ..ccproxy_manager import maybe_start_ccproxy, stop_ccproxy
+
+            _ccproxy_proc_serve = maybe_start_ccproxy(config)
+            if _ccproxy_proc_serve:
+                import atexit
+
+                atexit.register(stop_ccproxy, _ccproxy_proc_serve)
+        except RuntimeError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+
+    if not config.channel_enabled:
+        console.print("[red]No channels configured.[/red]")
+        console.print("[dim]Run [bold]evoquant channel setup[/bold] first.[/dim]")
+        raise typer.Exit(1)
+
+    effective_channel_thinking = config.channel_send_thinking and (not no_thinking)
+    if workdir:
+        ws = os.path.abspath(os.path.expanduser(workdir))
+    elif config.default_workdir:
+        ws = os.path.abspath(os.path.expanduser(config.default_workdir))
+    else:
+        ws = os.getcwd()
+    os.makedirs(ws, exist_ok=True)
+    set_workspace_root(ws)
+    ensure_dirs()
+
+    # Auto-start langgraph dev (after workspace resolution, so deployed
+    # async sub-agents inherit the CLI's workspace via EVOSCIENTIST_WORKSPACE_DIR).
+    _ensure_async_subagent_server(config, workspace_dir=ws)
+
+    if config.dangerous_mode:
+        from ._constants import DANGEROUS_BANNER_LABEL, DANGEROUS_BANNER_MESSAGE
+
+        console.print(
+            f"[bold white on red] ⚠ {DANGEROUS_BANNER_LABEL} [/bold white on red] "
+            f"[bold red]{DANGEROUS_BANNER_MESSAGE}[/bold red]"
+        )
+    console.print("[dim]Loading agent...[/dim]")
+    agent = _load_agent(workspace_dir=ws, config=config)
+
+    runtime_gateways = create_runtime_gateways()
+    tid = asyncio.run(
+        runtime_gateways.graph_gateway.create_thread(GraphTarget(workspace_dir=ws))
+    )
+
+    # Mutable runtime shared with _serve_process_message so channel slash
+    # commands can update the active agent/thread/workspace for subsequent
+    # messages.
+    runtime_state = ServeRuntimeState(
+        agent=agent,
+        thread_id=tid,
+        workspace_dir=ws,
+        config=config,
+        runtime_gateways=runtime_gateways,
+    )
+
+    channel_runtime = ChannelRuntime(agent=agent, thread_id=tid)
+
+    # Build the slash-dispatch callbacks once; the poll loop reuses
+    # them for every inbound message.  Without this hoist each message
+    # would allocate a fresh closure pair.
+    _serve_on_cmd_completed = _make_serve_cmd_completed_hook(
+        runtime_state, channel_runtime, config=config
+    )
+    _serve_handle_session_resume_cb = _make_serve_handle_session_resume_cb(
+        runtime_state, channel_runtime, config=config
+    )
+    _serve_start_new_session_cb = _make_serve_start_new_session_cb(
+        runtime_state, channel_runtime
+    )
+
+    _start_channels_bus_mode(
+        config,
+        agent,
+        tid,
+        send_thinking=effective_channel_thinking,
+    )
+    console.print("[green]Serve mode started (bus mode).[/green]")
+
+    console.print(f"[dim]Thread: {tid}[/dim]")
+    console.print(f"[dim]Workspace: {_shorten_path(ws)}[/dim]")
+    console.print("[dim]Press Ctrl+C to stop.[/dim]\n")
+
+    # Explicit SIGINT/SIGTERM handlers.  Python's default SIGINT raises
+    # KeyboardInterrupt in the main thread, which ought to unblock
+    # ``_message_queue.get(timeout=...)`` and land in the ``except``
+    # below — but edge cases (e.g. an asyncio ``set_wakeup_fd`` left
+    # dangling by a nested ``asyncio.run``) can silently swallow the
+    # signal.  Setting a ``threading.Event`` in addition gives us a
+    # second gate that the poll loop always observes.
+    import signal
+    import threading
+
+    shutdown_event = threading.Event()
+
+    def _handle_shutdown(signum: int, _frame: Any) -> None:
+        shutdown_event.set()
+        # Fall back to Python's default SIGINT behavior (raises
+        # KeyboardInterrupt) so blocking I/O inside ``run_streaming``
+        # is still interrupted.  For SIGTERM there's no default that
+        # raises, so the event check below is the only gate.
+        if signum == signal.SIGINT:
+            signal.default_int_handler(signum, _frame)
+
+    _orig_sigint = signal.signal(signal.SIGINT, _handle_shutdown)
+    _orig_sigterm = signal.signal(signal.SIGTERM, _handle_shutdown)
+
+    try:
+        while not shutdown_event.is_set():
+            try:
+                msg = _message_queue.get(timeout=0.5)
+            except queue.Empty:
+                msg = None
+            if shutdown_event.is_set():
+                break
+            if msg is not None:
+                try:
+                    _serve_process_message(
+                        msg,
+                        runtime_state=runtime_state,
+                        model=config.model,
+                        workspace_dir=ws,
+                        show_thinking=effective_channel_thinking,
+                        on_cmd_completed=_serve_on_cmd_completed,
+                        handle_session_resume_cb=_serve_handle_session_resume_cb,
+                        start_new_session_cb=_serve_start_new_session_cb,
+                        channel_runtime=channel_runtime,
+                    )
+                except KeyboardInterrupt:
+                    shutdown_event.set()
+                    break
+
+            # Poll notification queue when idle (no channel message was pending).
+            if async_notifier.has_pending_notifications(runtime_state.thread_id):
+                _serve_drain_notifications(
+                    runtime_state=runtime_state,
+                    model=config.model,
+                    workspace_dir=ws,
+                    show_thinking=effective_channel_thinking,
+                )
+    except KeyboardInterrupt:
+        shutdown_event.set()
+    finally:
+        signal.signal(signal.SIGINT, _orig_sigint)
+        signal.signal(signal.SIGTERM, _orig_sigterm)
+        console.print("\n[dim]Shutting down...[/dim]")
+        _channels_stop(runtime=channel_runtime)
+        console.print("[dim]Stopped.[/dim]")
+
+
+# =============================================================================
+# Config commands
+# =============================================================================
+
+
+@config_app.callback(invoke_without_command=True)
+def config_callback(ctx: typer.Context):
+    """Configuration management commands"""
+    if ctx.invoked_subcommand is None:
+        config_list()
+
+
+@config_app.command("list")
+def config_list():
+    """List all configuration values"""
+    from ..config import get_config_path, list_config
+
+    config_data = list_config()
+
+    table = Table(title="EvoQuant Configuration", show_header=True)
+    table.add_column("Setting", style="cyan")
+    table.add_column("Value")
+
+    # Mask API keys
+    def format_value(key: str, value: Any) -> str:
+        if "api_key" in key and value:
+            return "***" + str(value)[-4:] if len(str(value)) > 4 else "***"
+        if value == "":
+            return "[dim](not set)[/dim]"
+        return str(value)
+
+    for key, value in config_data.items():
+        table.add_row(key, format_value(key, value))
+
+    console.print(table)
+    console.print(f"\n[dim]Config file: {get_config_path()}[/dim]")
+
+
+@config_app.command("get")
+def config_get(key: str = typer.Argument(..., help="Configuration key to get")):
+    """Get a single configuration value"""
+    from ..config import get_config_value
+
+    value = get_config_value(key)
+    if value is None:
+        console.print(f"[red]Unknown key: {key}[/red]")
+        raise typer.Exit(1)
+
+    # Mask API keys
+    if "api_key" in key and value:
+        display_value = "***" + str(value)[-4:] if len(str(value)) > 4 else "***"
+    elif value == "":
+        display_value = "(not set)"
+    else:
+        display_value = str(value)
+
+    console.print(f"[cyan]{key}[/cyan]: {display_value}")
+
+
+@config_app.command("set")
+def config_set(
+    key: str = typer.Argument(..., help="Configuration key to set"),
+    value: str = typer.Argument(..., help="New value"),
+):
+    """Set a single configuration value"""
+    from ..config import set_config_value
+
+    if set_config_value(key, value):
+        console.print(f"[green]Set {escape(key)}[/green]")
+    else:
+        console.print(f"[red]Could not set {escape(key)}: invalid key or value[/red]")
+        raise typer.Exit(1)
+
+
+@config_app.command("reset")
+def config_reset(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+):
+    """Reset configuration to defaults"""
+    from ..config import get_config_path, reset_config
+
+    config_path = get_config_path()
+
+    if not config_path.exists():
+        console.print("[yellow]No config file to reset.[/yellow]")
+        return
+
+    if not yes:
+        confirm = typer.confirm("Reset configuration to defaults?")
+        if not confirm:
+            console.print("[dim]Cancelled.[/dim]")
+            return
+
+    reset_config()
+    console.print("[green]Configuration reset to defaults.[/green]")
+
+
+@config_app.command("path")
+def config_path():
+    """Show the configuration file path"""
+    from ..config import get_config_path
+
+    path = get_config_path()
+    exists = path.exists()
+    status = "[green]exists[/green]" if exists else "[dim]not created yet[/dim]"
+    console.print(f"{path} ({status})")
+
+
+# =============================================================================
+# MCP commands
+# =============================================================================
+
+
+@mcp_app.callback(invoke_without_command=True)
+def mcp_callback(ctx: typer.Context):
+    """MCP server management commands"""
+    if ctx.invoked_subcommand is None:
+        mcp_list()
+
+
+@mcp_app.command("list")
+def mcp_list():
+    """List configured MCP servers"""
+    _mcp_list_servers()
+
+
+@mcp_app.command("config")
+def mcp_config(
+    name: str | None = typer.Argument(None, help="Server name (omit to show all)"),
+):
+    """Show detailed configuration for MCP servers
+
+    \b
+    Examples:
+      evoquant mcp config             # Show all servers in detail
+      evoquant mcp config filesystem  # Show one server
+    """
+    status = _show_mcp_config(name or "", show_blank_line=False)
+    if status == "empty":
+        console.print(
+            "[dim]Add one with:[/dim] EvoQuant mcp add <name> <transport> <command-or-url> [args...]"
+        )
+        return
+    if status == "missing":
+        raise typer.Exit(1)
+
+
+@mcp_app.command("add")
+def mcp_add(
+    name: Annotated[str, typer.Argument(help="Server name")],
+    target: Annotated[str, typer.Argument(help="Command (stdio) or URL (http/sse)")],
+    args: Annotated[
+        list[str] | None, typer.Argument(help="Extra args for stdio command")
+    ] = None,
+    transport: Annotated[
+        str | None,
+        typer.Option("--transport", "-T", help="Transport type (default: auto-detect)"),
+    ] = None,
+    tools: Annotated[
+        str | None,
+        typer.Option(
+            "--tools",
+            "-t",
+            help="Comma-separated tool allowlist (supports wildcards: *_exa, read_*)",
+        ),
+    ] = None,
+    expose_to: Annotated[
+        str | None,
+        typer.Option("--expose-to", "-e", help="Comma-separated target agents"),
+    ] = None,
+    header: Annotated[
+        list[str] | None,
+        typer.Option("--header", "-H", help="HTTP header as Key:Value (repeatable)"),
+    ] = None,
+    env: Annotated[
+        list[str] | None,
+        typer.Option("--env", help="Env var as KEY=VALUE for stdio (repeatable)"),
+    ] = None,
+    env_ref: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--env-ref", help="Env var name as ${NAME} runtime ref (repeatable)"
+        ),
+    ] = None,
+):
+    """Add an MCP server to user config
+
+    \b
+    Transport is auto-detected: URLs default to http, commands default to stdio.
+
+    \b
+    Examples:
+      evoquant mcp add sequential-thinking npx -- -y @modelcontextprotocol/server-sequential-thinking
+      evoquant mcp add docs-langchain https://docs.langchain.com/mcp
+      evoquant mcp add my-sse https://example.com/sse --transport sse -e research-agent
+      evoquant mcp add brave-search npx --env-ref BRAVE_API_KEY -- -y @modelcontextprotocol/server-brave-search
+    """
+    from ..mcp import build_mcp_add_kwargs
+
+    # Merge env and env_ref into a single dict
+    env_dict: dict[str, str] = {}
+    for e in env or []:
+        if "=" in e:
+            k, v = e.split("=", 1)
+            env_dict[k.strip()] = v.strip()
+    for ref in env_ref or []:
+        env_dict[ref] = "${" + ref + "}"
+
+    kwargs = build_mcp_add_kwargs(
+        name=name,
+        target=target,
+        extra_args=list(args) if args else None,
+        transport=transport,
+        tools=[t.strip() for t in tools.split(",") if t.strip()] if tools else None,
+        expose_to=[a.strip() for a in expose_to.split(",") if a.strip()]
+        if expose_to
+        else None,
+        headers={
+            k.strip(): v.strip()
+            for h in (header or [])
+            for k, v in [h.split(":", 1)]
+            if ":" in h
+        }
+        or None,
+        env=env_dict or None,
+    )
+
+    if not _mcp_add_server_from_kwargs(kwargs, show_reload_hint=False):
+        raise typer.Exit(1)
+
+
+@mcp_app.command("edit")
+def mcp_edit(
+    name: Annotated[str, typer.Argument(help="Server name to edit")],
+    transport: Annotated[
+        str | None, typer.Option("--transport", help="New transport type")
+    ] = None,
+    command: Annotated[
+        str | None, typer.Option("--command", help="New command (stdio)")
+    ] = None,
+    url: Annotated[
+        str | None, typer.Option("--url", help="New URL (http/sse/websocket)")
+    ] = None,
+    tools: Annotated[
+        str | None,
+        typer.Option(
+            "--tools",
+            "-t",
+            help="Comma-separated tool allowlist, supports wildcards ('none' to clear)",
+        ),
+    ] = None,
+    expose_to: Annotated[
+        str | None,
+        typer.Option(
+            "--expose-to",
+            "-e",
+            help="Comma-separated target agents ('none' to clear)",
+        ),
+    ] = None,
+    header: Annotated[
+        list[str] | None,
+        typer.Option("--header", "-H", help="HTTP header as Key:Value (repeatable)"),
+    ] = None,
+    env: Annotated[
+        list[str] | None,
+        typer.Option("--env", help="Env var as KEY=VALUE for stdio (repeatable)"),
+    ] = None,
+):
+    """Edit an existing MCP server in user config
+
+    \b
+    Examples:
+      evoquant mcp edit filesystem --expose-to main,code-agent
+      evoquant mcp edit filesystem -t read_file,write_file
+      evoquant mcp edit my-api --url http://new-host:9090/mcp
+      evoquant mcp edit my-api --tools none
+    """
+    from ..mcp import build_mcp_edit_fields
+
+    fields = build_mcp_edit_fields(
+        transport=transport,
+        command=command,
+        url=url,
+        tools=tools,
+        expose_to=expose_to,
+        headers=header,
+        env=env,
+    )
+
+    if not _mcp_edit_server_fields(name, fields, show_reload_hint=False):
+        raise typer.Exit(1)
+
+
+@mcp_app.command("remove")
+def mcp_remove(
+    name: str = typer.Argument(..., help="Server name to remove"),
+):
+    """Remove an MCP server from user config"""
+    if not _mcp_remove_server(name, show_reload_hint=False):
+        raise typer.Exit(1)
+
+
+@mcp_app.command("install")
+def mcp_install(
+    source: Annotated[
+        str | None, typer.Argument(help="Server name or tag filter")
+    ] = None,
+):
+    """Browse and install MCP servers from the registry and marketplace
+
+    \b
+    Examples:
+      evoquant mcp install                       # Interactive browser
+      evoquant mcp install search                # Filter by 'search' tag
+      evoquant mcp install sequential-thinking   # Install by name
+    """
+    from .mcp_install_cmd import _cmd_install_mcp
+
+    _cmd_install_mcp(source or "")
+
+
+# =============================================================================
+# Sessions commands — read-only diagnostics for ~/.evoquant/sessions.db
+# =============================================================================
+
+
+def _format_bytes(n: int) -> str:
+    """Render a byte count as a human-readable string (KB / MB / GB)."""
+    if n < 1024:
+        return f"{n} B"
+    units = ["KB", "MB", "GB", "TB"]
+    size = float(n) / 1024.0
+    for unit in units:
+        if size < 1024.0:
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{size:.1f} PB"
+
+
+@sessions_app.callback(invoke_without_command=True)
+def sessions_callback(ctx: typer.Context):
+    """Inspect and manage the sessions DB.
+
+    Running ``EvoQuant sessions`` with no subcommand defaults to ``stats``
+    so the bare command is informative rather than silent.
+    """
+    if ctx.invoked_subcommand is None:
+        sessions_stats()
+
+
+@sessions_app.command("stats")
+def sessions_stats():
+    """Show DB size, thread count, total checkpoints, top heaviest threads."""
+    import asyncio
+
+    from ..sessions import db_stats
+
+    try:
+        stats = asyncio.get_event_loop().run_until_complete(db_stats())
+    except RuntimeError:
+        stats = asyncio.new_event_loop().run_until_complete(db_stats())
+
+    table = Table(title="EvoQuant sessions DB", show_header=True)
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value")
+    table.add_row("Path", stats["db_path"])
+    table.add_row("Size", _format_bytes(int(stats["size_bytes"])))
+    table.add_row("Threads", str(stats["thread_count"]))
+    table.add_row("Checkpoints", str(stats["checkpoint_count"]))
+    table.add_row("Writes", str(stats["write_count"]))
+    console.print(table)
+
+    if stats["top_threads"]:
+        top = Table(title="Heaviest threads (checkpoints per thread)")
+        top.add_column("thread_id", style="yellow")
+        top.add_column("checkpoints", justify="right")
+        for row in stats["top_threads"]:
+            top.add_row(str(row["thread_id"]), str(row["count"]))
+        console.print(top)
+
+
+# =============================================================================
+# Main callback (default behavior)
+# =============================================================================
+
+
+def _version_callback(value: bool):
+    if value:
+        typer.echo(f"EvoQuant {_pkg_version('EvoQuant')}")
+        raise typer.Exit()
+
+
+def _is_fresh_interactive_session(prompt: str | None, thread_id: str | None) -> bool:
+    """True for a brand-new interactive session — no one-shot ``-p`` prompt and
+    no ``--resume`` / ``--thread-id`` to continue.
+
+    This is the only case where a WebUI-configured ``EvoQuant`` opens the browser
+    app: a one-shot or a resume has a concrete conversation to render in the
+    terminal, so it falls back to the Rich CLI instead.
+    """
+    return not prompt and not thread_id
+
+
+@app.callback(invoke_without_command=True)
+def _main_callback(
+    ctx: typer.Context,
+    version: bool | None = typer.Option(
+        None,
+        "-V",
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show version and exit.",
+    ),
+    mode: str | None = typer.Option(
+        None,
+        "-m",
+        "--mode",
+        help="Workspace mode: 'daemon' (persistent, default) or 'run' (isolated per-session)",
+    ),
+    name: str | None = typer.Option(
+        None,
+        "-n",
+        "--name",
+        help="Name for this run (used as directory name instead of timestamp; requires --mode run)",
+    ),
+    prompt: str | None = typer.Option(
+        None, "-p", "--prompt", help="Query to execute (single-shot mode)"
+    ),
+    thread_id: str | None = typer.Option(
+        None,
+        "--resume",
+        "--thread-id",
+        help="Thread ID (or prefix) to resume a previous session.",
+    ),
+    workdir: str | None = typer.Option(
+        None, "--workdir", help="Override workspace directory for this session"
+    ),
+    use_cwd: bool = typer.Option(
+        False, "--use-cwd", help="Use current working directory as workspace"
+    ),
+    no_thinking: bool = typer.Option(
+        False, "--no-thinking", help="Disable thinking display"
+    ),
+    auto_approve: bool = typer.Option(
+        False,
+        "--auto-approve",
+        help="Skip tool approval prompts for HITL actions",
+    ),
+    auto_mode: bool = typer.Option(
+        False,
+        "--auto-mode",
+        help="Run unattended: skip ask_user and tool approval prompts",
+    ),
+    ask_user: bool = typer.Option(
+        False,
+        "--ask-user",
+        help="Enable agent to ask clarifying questions about your research preferences",
+    ),
+    dangerous: bool = typer.Option(
+        False,
+        "--dangerous",
+        help="DANGEROUS: real-filesystem access (no workspace confinement); implies --auto-approve",
+    ),
+    auth_mode: str | None = typer.Option(
+        None,
+        "--auth-mode",
+        help="Auth mode for Anthropic/OpenAI: api_key (default) or oauth (ccproxy).",
+    ),
+    ui: str | None = typer.Option(
+        None,
+        "--ui",
+        help="UI backend: tui (default), cli, or webui.",
+    ),
+):
+    """EvoQuant Agent - AI-powered research & code execution CLI"""
+    # If a subcommand was invoked, don't run the default behavior
+    if ctx.invoked_subcommand is not None:
+        return
+
+    # Load and apply configuration
+    from ..config import apply_config_to_env, get_effective_config
+
+    # Build CLI overrides dict
+    cli_overrides = {}
+    if mode:
+        cli_overrides["default_mode"] = mode
+    if workdir:
+        cli_overrides["default_workdir"] = workdir
+    if no_thinking:
+        cli_overrides["show_thinking"] = False
+    if ui:
+        cli_overrides["ui_backend"] = ui
+    if auto_approve:
+        cli_overrides["auto_approve"] = True
+    if auto_mode:
+        cli_overrides["auto_mode"] = True
+        cli_overrides["auto_approve"] = True
+        cli_overrides["enable_ask_user"] = False
+    elif ask_user:
+        cli_overrides["enable_ask_user"] = True
+    if dangerous:
+        cli_overrides["dangerous_mode"] = True
+    if auth_mode:
+        if auth_mode not in ("api_key", "oauth"):
+            raise typer.BadParameter("--auth-mode must be 'api_key' or 'oauth'")
+        cli_overrides["anthropic_auth_mode"] = auth_mode
+        cli_overrides["openai_auth_mode"] = auth_mode
+
+    config = get_effective_config(cli_overrides)
+    apply_config_to_env(config)
+
+    # Auto-start ccproxy if any provider uses OAuth mode
+    _ccproxy_proc = None
+    if config.anthropic_auth_mode == "oauth" or config.openai_auth_mode == "oauth":
+        try:
+            from ..ccproxy_manager import maybe_start_ccproxy, stop_ccproxy
+
+            _ccproxy_proc = maybe_start_ccproxy(config)
+            if _ccproxy_proc:
+                import atexit
+
+                atexit.register(stop_ccproxy, _ccproxy_proc)
+        except RuntimeError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+
+    show_thinking = config.show_thinking if not no_thinking else False
+    effective_channel_thinking = config.channel_send_thinking and (not no_thinking)
+
+    # Validate mutually exclusive options
+    if workdir and use_cwd:
+        raise typer.BadParameter("Use either --workdir or --use-cwd, not both.")
+
+    if mode and (workdir or use_cwd):
+        raise typer.BadParameter(
+            "--mode cannot be combined with --workdir or --use-cwd"
+        )
+
+    if mode and mode not in ("run", "daemon"):
+        raise typer.BadParameter("--mode must be 'run' or 'daemon'")
+    if ui and ui.lower() not in ("cli", "tui", "webui"):
+        raise typer.BadParameter("--ui must be 'tui', 'cli', or 'webui'")
+
+    # --name only makes sense in run mode
+    if name and not (
+        mode == "run"
+        or (not mode and not workdir and not use_cwd and config.default_mode == "run")
+    ):
+        raise typer.BadParameter("--name can only be used with --mode run")
+
+    # Sanitize run name: allow alphanumeric, hyphens, underscores
+    if name:
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+            raise typer.BadParameter(
+                "--name may only contain letters, digits, hyphens, and underscores"
+            )
+
+    # Resolve effective mode from config (CLI mode already applied via overrides)
+    effective_mode: str | None = (
+        None  # None means explicit --workdir/--use-cwd was used
+    )
+
+    # Resolve workspace directory for this session
+    # Priority: --workdir > --mode (explicit) > default_workdir > default_mode > cwd
+    # --use-cwd is kept for backward compat but is now the default behavior
+    if use_cwd:
+        workspace_dir = os.getcwd()
+        set_workspace_root(workspace_dir)
+        workspace_fixed = True
+    elif workdir:
+        workspace_dir = os.path.abspath(os.path.expanduser(workdir))
+        os.makedirs(workspace_dir, exist_ok=True)
+        set_workspace_root(workspace_dir)
+        workspace_fixed = True
+    elif mode:
+        # Explicit --mode overrides default_workdir
+        effective_mode = mode
+        workspace_root = config.default_workdir or os.getcwd()
+        workspace_root = os.path.abspath(os.path.expanduser(workspace_root))
+        set_workspace_root(workspace_root)
+        if effective_mode == "run":
+            runs_dir = Path(workspace_root, "runs")
+            session_id = (
+                _deduplicate_run_name(name, runs_dir)
+                if name
+                else datetime.now().strftime("%Y%m%d_%H%M%S")
+            )
+            workspace_dir = os.path.join(runs_dir, session_id)
+            os.makedirs(workspace_dir, exist_ok=True)
+            workspace_fixed = False
+        else:  # daemon
+            workspace_dir = workspace_root
+            workspace_fixed = True
+    elif config.default_workdir:
+        # Use configured default workdir with configured mode
+        workspace_root = os.path.abspath(os.path.expanduser(config.default_workdir))
+        set_workspace_root(workspace_root)
+        effective_mode = config.default_mode
+        if effective_mode == "run":
+            runs_dir = Path(workspace_root, "runs")
+            session_id = (
+                _deduplicate_run_name(name, runs_dir)
+                if name
+                else datetime.now().strftime("%Y%m%d_%H%M%S")
+            )
+            workspace_dir = os.path.join(runs_dir, session_id)
+            os.makedirs(workspace_dir, exist_ok=True)
+            workspace_fixed = False
+        else:  # daemon
+            workspace_dir = workspace_root
+            workspace_fixed = True
+    else:
+        effective_mode = config.default_mode
+        workspace_root = os.getcwd()
+        set_workspace_root(workspace_root)
+        if effective_mode == "run":
+            workspace_dir = _create_session_workspace(name)
+            workspace_fixed = False
+        else:  # daemon mode (default) — use current directory
+            workspace_dir = workspace_root
+            workspace_fixed = True
+
+    # Ensure memory and skills subdirs exist in workspace
+    ensure_dirs()
+
+    # WebUI mode: instead of the in-terminal CLI/TUI, run a deploy-style
+    # langgraph server (full MCP + async) + the published @evoquant/webui
+    # front-end (npx) in THIS terminal, then block. Reuses start_langgraph_dev
+    # but leaves `EvoQuant deploy` untouched (it stays a clean server for external
+    # UIs / SDK clients).
+    #
+    # The browser app is only launched for a FRESH interactive session. With
+    # `-p` (one-shot) or `--resume`/`--thread-id` (continue a specific
+    # conversation), there is concrete terminal output to render, so fall back
+    # to the Rich CLI instead of opening the browser UI.
+    from .tui_runtime import normalize_ui_backend
+
+    if normalize_ui_backend(config.ui_backend) == "webui":
+        if _is_fresh_interactive_session(prompt, thread_id):
+            from ..deploy.webui import run_webui
+
+            run_webui(config, workspace_dir=workspace_dir)
+            return
+        config.ui_backend = "cli"
+
+    # Auto-start langgraph dev (after workspace resolution, so deployed
+    # async sub-agents inherit the CLI's workspace via EVOSCIENTIST_WORKSPACE_DIR).
+    _ensure_async_subagent_server(config, workspace_dir=workspace_dir)
+
+    if prompt:
+        # Single-shot mode: wrap in persistent checkpointer
+        import asyncio
+
+        from ..sessions import get_checkpointer
+        from .interactive import cmd_run
+        from .resume_hint import print_resume_hint
+
+        runtime_gateways = create_runtime_gateways()
+        graph_gateway = runtime_gateways.graph_gateway
+
+        async def _single_shot():
+            async with get_checkpointer() as checkpointer:
+                # Resolve resume target first so a bad --resume/--thread-id
+                # exits before the slow _load_agent() provider setup.
+                if thread_id:
+                    resolution = await graph_gateway.resolve_thread(thread_id)
+                    if resolution.thread_id:
+                        tid = resolution.thread_id
+                    elif resolution.matches:
+                        console.print(
+                            f"[yellow]Ambiguous thread ID '{escape(thread_id)}'. Matches:[/yellow]"
+                        )
+                        for s in resolution.matches:
+                            console.print(f"  [cyan]{escape(s)}[/cyan]")
+                        raise typer.Exit(1)
+                    else:
+                        console.print(
+                            f"[red]Thread '{escape(thread_id)}' not found.[/red]"
+                        )
+                        raise typer.Exit(1)
+                else:
+                    tid = await graph_gateway.create_thread()
+                console.print("[dim]Loading agent...[/dim]")
+                agent = _load_agent(
+                    workspace_dir=workspace_dir,
+                    checkpointer=checkpointer,
+                    config=config,
+                )
+                try:
+                    cmd_run(
+                        agent,
+                        prompt,
+                        thread_id=tid,
+                        show_thinking=show_thinking,
+                        workspace_dir=workspace_dir,
+                        model=config.model,
+                        ui_backend=config.ui_backend,
+                        runtime_gateways=runtime_gateways,
+                    )
+                finally:
+                    try:
+                        print_resume_hint(tid, console=console)
+                    except Exception:
+                        pass
+
+        import nest_asyncio
+
+        nest_asyncio.apply()
+        asyncio.get_event_loop().run_until_complete(_single_shot())
+    else:
+        from .interactive import cmd_interactive
+
+        # Interactive mode (default) — checkpointer managed inside cmd_interactive
+        cmd_interactive(
+            show_thinking=show_thinking,
+            channel_send_thinking=effective_channel_thinking,
+            workspace_dir=workspace_dir,
+            workspace_fixed=workspace_fixed,
+            mode=effective_mode,
+            model=config.model,
+            provider=config.provider,
+            run_name=name,
+            thread_id=thread_id,
+            ui_backend=config.ui_backend,
+            config=config,
+        )
+
+
+def _configure_logging():
+    """Configure logging with warning symbols for better visibility."""
+    from rich.logging import RichHandler
+
+    from ..config import get_effective_config
+
+    def _resolve_log_level() -> int:
+        """Resolve the root log level from config/env with a safe fallback."""
+        try:
+            raw = (get_effective_config().log_level or "").strip().upper()
+        except Exception:
+            raw = ""
+        if raw == "WARN":
+            raw = "WARNING"
+        return getattr(logging, raw, logging.WARNING)
+
+    resolved_level = _resolve_log_level()
+    verbose_logging = resolved_level <= logging.DEBUG
+
+    class DimWarningHandler(RichHandler):
+        """Custom handler that renders warnings in dim style."""
+
+        def emit(self, record: logging.LogRecord) -> None:
+            if record.levelno == logging.WARNING:
+                # Use Rich console to print dim warning
+                msg = record.getMessage()
+                console.print(
+                    f"[dim yellow]\u26a0\ufe0f  Warning:[/dim yellow] [dim]{escape(msg)}[/dim]"
+                )
+            else:
+                super().emit(record)
+
+    # Configure root logger to use our handler for WARNING and above
+    handler = DimWarningHandler(
+        console=console,
+        show_time=verbose_logging,
+        show_path=verbose_logging,
+        show_level=verbose_logging,
+    )
+    handler.setLevel(resolved_level)
+
+    # Apply to root logger (catches all loggers including deepagents)
+    root_logger = logging.getLogger()
+    # Remove existing handlers to avoid duplicate output
+    for h in root_logger.handlers[:]:
+        root_logger.removeHandler(h)
+    root_logger.addHandler(handler)
+    root_logger.setLevel(resolved_level)
+
+    # Suppress noisy schema warnings from langchain_google_genai
+    # (e.g. "Key '$schema' is not supported in schema, ignoring")
+    logging.getLogger("langchain_google_genai._function_utils").setLevel(logging.ERROR)

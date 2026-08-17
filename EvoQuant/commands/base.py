@@ -1,0 +1,126 @@
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from ..gateway import GraphGateway
+
+
+@dataclass
+class Argument:
+    """Definition of a command argument."""
+
+    name: str
+    type: type
+    description: str
+    required: bool = True
+
+
+@dataclass
+class SubCommand:
+    """A subcommand of a parent slash command."""
+
+    name: str
+    description: str
+    arguments: list[Argument] = field(default_factory=list)
+
+
+@runtime_checkable
+class CommandUI(Protocol):
+    """Protocol for UI operations that commands can perform."""
+
+    @property
+    def supports_interactive(self) -> bool: ...
+
+    def append_system(self, text: str, style: str = "dim") -> None: ...
+    def mount_renderable(self, renderable: Any) -> None: ...
+
+    # Optional interactive operations
+    async def wait_for_thread_pick(
+        self, threads: list[dict], current_thread: str, title: str
+    ) -> str | None: ...
+    async def wait_for_skill_browse(
+        self, index: list[dict], installed_names: set[str], pre_filter_tag: str
+    ) -> list[str] | None: ...
+    async def wait_for_mcp_browse(
+        self, servers: list, installed_names: set[str], pre_filter_tag: str
+    ) -> list | None: ...
+    async def wait_for_model_pick(
+        self,
+        entries: list[tuple[str, str, str]],
+        current_model: str | None,
+        current_provider: str | None,
+    ) -> tuple[str, str] | None: ...
+    def clear_chat(self) -> None: ...
+    def request_quit(self) -> None: ...
+    def force_quit(self) -> None: ...
+    async def start_new_session(self) -> None: ...
+    async def handle_session_resume(
+        self, thread_id: str, workspace_dir: str | None = None
+    ) -> None: ...
+    async def flush(self) -> None: ...
+
+
+@dataclass
+class ChannelRuntime:
+    """Mutable handle to the agent + thread bound to running channels."""
+
+    agent: Any = None
+    thread_id: str | None = None
+
+    def bind(self, agent: Any, thread_id: str) -> None:
+        self.agent = agent
+        self.thread_id = thread_id
+
+    def clear(self) -> None:
+        self.agent = None
+        self.thread_id = None
+
+
+@dataclass
+class CommandContext:
+    """Context passed to commands during execution."""
+
+    agent: Any
+    thread_id: str
+    ui: CommandUI
+    workspace_dir: str | None = None
+    checkpointer: Any = None
+    config: Any = None
+    channel_runtime: ChannelRuntime | None = None
+    graph_gateway: GraphGateway | None = None
+    command_error: str | None = None
+    # Real LLM input token count from last usage_metadata (includes system
+    # prompt + tool schemas).  Used by /compact for accurate display.
+    input_tokens_hint: int | None = None
+
+
+class Command(ABC):
+    """Base class for all EvoQuant slash commands."""
+
+    name: str
+    alias: ClassVar[list[str]] = []
+    description: str
+    arguments: ClassVar[list[Argument]] = []
+    subcommands: ClassVar[list[SubCommand]] = []
+    # When False, callers may dispatch this command without waiting for
+    # the background agent load to finish — important so recovery
+    # commands like ``/mcp add`` can run even when the MCP load is
+    # failing and ``_await_agent_ready`` would hang.
+    requires_agent: ClassVar[bool] = False
+
+    def needs_agent(self, args: list[str]) -> bool:
+        """Whether this specific invocation needs the agent.
+
+        Default returns :attr:`requires_agent`.  Override when a command
+        has a mix of agent-using and agent-free subcommands (e.g.
+        ``/channel start`` vs ``/channel status``).
+        """
+        return self.requires_agent
+
+    @abstractmethod
+    async def execute(self, ctx: CommandContext, args: list[str]) -> None:
+        """Execute the command with given context and arguments."""
+        pass

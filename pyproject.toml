@@ -1,0 +1,201 @@
+[project]
+name = "EvoQuant"
+version = "0.1.0"
+description = "EvoQuant: An Autonomous Research Agent for Quantitative Science"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [
+    { name = "CamusGIT" },
+]
+maintainers = [
+    { name = "CamusGIT" },
+]
+keywords = ["ai-scientific", "scientific-discovery", "self-evolving", "ai-scientists", "end-to-end"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "deepagents[quickjs]~=0.6.12",
+    "langchain>=1.3",
+    "langchain-anthropic>=1.4",
+    "langchain-openai>=1.2",
+    "langchain-nvidia-ai-endpoints>=1.2",
+    "langchain-google-genai>=4.2",
+    "langchain-ollama>=1.1",
+    "langchain-openrouter>=0.2.3",
+    "tavily-python>=0.7",
+    "pyyaml>=6.0",
+    "rich>=15.0",
+    "prompt-toolkit>=3.0",
+    "questionary>=2.1",
+    "typer>=0.24",
+    "python-dotenv>=1.0",
+    "langgraph-cli[inmem]>=0.4",
+    "langgraph-checkpoint-sqlite>=3.0",
+    "httpx>=0.28",
+    "psutil>=6.0",
+    "filelock>=3.16",
+    "lazy-loader>=0.5",
+    "markdownify>=1.2",
+    "nest-asyncio>=1.6",
+    "tzlocal>=5.0",
+    "langchain-mcp-adapters>=0.2",
+    # <8.2.7: 8.2.7 Kitty "report-all-keys" breaks CJK input on iTerm2
+    "textual>=8.0,<8.2.7",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-timeout>=2.4",
+    "ruff>=0.5",
+    "build>=1.0",
+    "pre-commit>=3.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-timeout>=2.4",
+    "ruff>=0.5",
+    "build>=1.0",
+    "pre-commit>=3.5.0",
+]
+# Runtime dependencies for the bundled skills' scripts. Not needed by the core
+# agent; install only when running those skills:  uv pip install -e ".[skills]"
+skills = [
+    # quant-paper-extractor: PDF -> structured JSONL
+    "pymupdf4llm>=0.0.20",
+    "pymupdf>=1.25.0",
+    "pypdf>=4.0.0",
+    # quant-experiment-runtime: offline panel build + IC metrics
+    "pandas>=2.0,<3",
+    "pyarrow>=14",
+    "numpy>=1.24,<2",
+    # nano-banana: Gemini image generation + PPTX packaging
+    "google-genai>=1.0",
+    "Pillow>=10.0",
+    "python-pptx>=0.6",
+    # paper-graph: DeepXiv arXiv search fallback (S2 works without it)
+    "deepxiv-sdk>=0.2",
+]
+telegram = ["python-telegram-bot>=21.0"]
+discord = ["discord.py>=2.3"]
+slack = ["slack-sdk>=3.27", "aiohttp>=3.9"]
+wechat = ["pycryptodome>=3.20", "aiohttp>=3.9", "qrcode>=7.4", "certifi>=2024.0"]
+feishu = ["lark-oapi>=1.4.0"]
+qq = [
+    "qq-botpy>=1.0",
+    "cryptography>=41.0",
+    "qrcode>=7.4",
+]
+stt = ["faster-whisper>=1.0"]
+oauth = ["ccproxy-api>=0.2.7"]
+all-channels = [
+    "python-telegram-bot>=21.0",
+    "discord.py>=2.3",
+    "aiohttp>=3.9",
+    "slack-sdk>=3.27",
+    "pycryptodome>=3.20",
+    "qrcode>=7.4",
+    "certifi>=2024.0",
+    "lark-oapi>=1.4.0",
+    "qq-botpy>=1.0",
+    "cryptography>=41.0",
+    "qrcode>=7.4",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/CamusGIT/EvoQuant"
+"Bug Tracker" = "https://github.com/CamusGIT/EvoQuant/issues"
+"Documentation" = "https://github.com/CamusGIT/EvoQuant#readme"
+
+[project.scripts]
+evoquant = "EvoQuant.cli:main"
+EvoQuant = "EvoQuant.cli:main"
+EvoQuant = "EvoQuant.cli:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["EvoQuant*"]
+
+[tool.setuptools.package-data]
+EvoQuant = [
+    "subagents/*.yaml",
+    "langgraph_dev/*.json",
+    "skills/**/*",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::UserWarning:langchain_nvidia_ai_endpoints",
+]
+
+[tool.ruff]
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+]
+
+line-length = 88
+indent-width = 4
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle (Error & Warning)
+    "F",       # Pyflakes (Logical errors)
+    "I",       # isort (Import sorting)
+    "B",       # flake8-bugbear (Common bugs)
+    "C4",      # flake8-comprehensions (List/Dict perf)
+    "UP",      # pyupgrade (Modern Python syntax)
+    "PT",      # flake8-pytest-style (If using Pytest)
+    "PLE",     # Pylint Error
+    "RUF",     # Ruff specific rules
+    "FURB",    # Refurb rules
+]
+ignore = [
+    "E501", # Formatter takes care of that
+]
+fixable = ["ALL"]
+unfixable = []
+allowed-confusables = ["–", "❯", "：", "（", "）", "，", "｜", "＂", "［", "］", "｛", "｝", "＃", "；", "ρ", "×"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = false
