@@ -35,6 +35,9 @@ bridge/package-lock.json
 # Project specific
 .langgraph_api/
 workspace/
+# Eval snapshot corpus: text artifacts committed, broker PDFs are not
+!tests/evals/fixtures/workspace/
+tests/evals/fixtures/workspace/rawpaper/
 skills/
 !EvoQuant/skills/
 memory/
@@ -48,3 +51,6 @@ conversation_history/
 *meals/
 botpy.log
 large_tool_results/
+
+# deepeval local run artifacts
+.deepeval/

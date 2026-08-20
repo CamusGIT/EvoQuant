@@ -53,6 +53,7 @@ dev = [
     "ruff>=0.5",
     "build>=1.0",
     "pre-commit>=3.5.0",
+    "deepeval>=4.1.8",
 ]
 
 [project.optional-dependencies]
@@ -116,11 +117,15 @@ all-channels = [
 [project.scripts]
 evoquant = "EvoQuant.cli:main"
 EvoQuant = "EvoQuant.cli:main"
-EvoQuant = "EvoQuant.cli:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.uv]
+# deepeval 4.x caps rich<15, but the app's TUI (textual 8.x) needs rich>=15.
+# deepeval only uses rich for terminal rendering — keep the app pin authoritative.
+override-dependencies = ["rich>=15.0"]
 
 [tool.setuptools.packages.find]
 include = ["EvoQuant*"]
