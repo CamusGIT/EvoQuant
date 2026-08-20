@@ -363,6 +363,10 @@ class EvoQuantConfig:
     # benefit). Only the resource budget knobs are user-tunable.
     code_interpreter_timeout: float = 60.0  # seconds per JS eval
     code_interpreter_max_result_chars: int = 10000  # truncate large JSON results
+    # Same guard for EVERY tool result (file reads, corpus search, sub-agent
+    # returns) — the eval baseline showed one 165KB document result ballooning
+    # the history to a provider-killing 420KB request.
+    tool_result_max_chars: int = 24000
 
     # Default per-command timeout (seconds) for the sandbox `execute` tool.
     # Only the default — the agent can still override per command up to the
@@ -674,6 +678,7 @@ _ENV_MAPPINGS = {
     "scheduler_default_timezone": "EVOSCIENTIST_SCHEDULER_DEFAULT_TIMEZONE",
     "code_interpreter_timeout": "EVOSCIENTIST_CODE_INTERPRETER_TIMEOUT",
     "code_interpreter_max_result_chars": "EVOSCIENTIST_CODE_INTERPRETER_MAX_RESULT_CHARS",
+    "tool_result_max_chars": "EVOSCIENTIST_TOOL_RESULT_MAX_CHARS",
     "sandbox_execute_timeout": "EVOSCIENTIST_SANDBOX_EXECUTE_TIMEOUT",
     "langgraph_dev_file_persistence": "EVOSCIENTIST_LANGGRAPH_DEV_FILE_PERSISTENCE",
     "langgraph_dev_jobs_per_worker": "EVOSCIENTIST_LANGGRAPH_DEV_JOBS_PER_WORKER",

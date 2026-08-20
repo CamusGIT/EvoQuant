@@ -29,6 +29,12 @@ _SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1"
 
 _ZHIPU_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
 _ZHIPU_CODE_BASE_URL = "https://open.bigmodel.cn/api/coding/paas/v4"
+# Z.ai (智谱全球站) — separate domain/account pool from open.bigmodel.cn.
+# Chat Completions-compatible endpoints; the Anthropic-protocol mirror lives
+# in _ANTHROPIC_ROUTED_PROVIDERS below.
+_ZAI_BASE_URL = "https://api.z.ai/api/v1"
+_ZAI_CODE_BASE_URL = "https://api.z.ai/api/coding/paas/v4"
+_ZAI_ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
 _VOLCENGINE_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 _DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 _DASHSCOPE_CODE_BASE_URL = "https://coding.dashscope.aliyuncs.com/v1"
@@ -45,6 +51,8 @@ _OPENAI_ROUTED_PROVIDERS: dict[str, tuple[str | None, str]] = {
     "siliconflow": (_SILICONFLOW_BASE_URL, "SILICONFLOW_API_KEY"),
     "zhipu": (_ZHIPU_BASE_URL, "ZHIPU_API_KEY"),
     "zhipu-code": (_ZHIPU_CODE_BASE_URL, "ZHIPU_API_KEY"),
+    "zai": (_ZAI_BASE_URL, "ZAI_API_KEY"),
+    "zai-code": (_ZAI_CODE_BASE_URL, "ZAI_API_KEY"),
     "volcengine": (_VOLCENGINE_BASE_URL, "VOLCENGINE_API_KEY"),
     "dashscope": (_DASHSCOPE_BASE_URL, "DASHSCOPE_API_KEY"),
     "dashscope-code": (_DASHSCOPE_CODE_BASE_URL, "DASHSCOPE_API_KEY"),
@@ -59,6 +67,7 @@ _OPENAI_ROUTED_PROVIDERS: dict[str, tuple[str | None, str]] = {
 _ANTHROPIC_ROUTED_PROVIDERS: dict[str, tuple[str | None, str]] = {
     "minimax": (_MINIMAX_ANTHROPIC_BASE_URL, "MINIMAX_API_KEY"),
     "kimi-coding": (_KIMI_CODING_BASE_URL, "KIMI_API_KEY"),
+    "zai-anthropic": (_ZAI_ANTHROPIC_BASE_URL, "ZAI_API_KEY"),
     "custom-anthropic": (None, "CUSTOM_ANTHROPIC_API_KEY"),
 }
 
@@ -167,6 +176,9 @@ _MODEL_ENTRIES: list[tuple[str, str, str]] = [
     ("glm-5-turbo", "glm-5-turbo", "zhipu-code"),
     ("glm-5v-turbo", "glm-5v-turbo", "zhipu-code"),
     ("glm-4.7", "glm-4.7", "zhipu-code"),
+    # Z.ai Coding Plan (智谱全球站 coding 端点 — separate keys from bigmodel.cn)
+    ("glm-5.2", "glm-5.2", "zai-code"),
+    ("glm-5.1", "glm-5.1", "zai-code"),
     # Zhipu (智谱 — general endpoint, default for simple lookups)
     ("glm-5.1", "glm-5.1", "zhipu"),
     ("glm-5", "glm-5", "zhipu"),
@@ -458,6 +470,18 @@ def get_chat_model(
         api_key = os.environ.get(api_key_env, "")
         if api_key:
             kwargs["api_key"] = api_key
+        # zai (api.z.ai): the gateway kills NON-streaming chat requests whose
+        # first response byte takes >~360s — thinking models (glm) with long
+        # generations reliably exceed this, and the server-side disconnect
+        # surfaces as APIConnectionError (not APITimeoutError), so OpenAI SDK
+        # retries/middleware overflow patterns never match it. Streaming keeps
+        # bytes flowing from the first token, so the gateway never trips.
+        if _original_provider in ("zai", "zai-code"):
+            kwargs.setdefault("streaming", True)
+            # Thinking models can go minutes between chunks mid-generation
+            # (deep reasoning phases emit nothing); the default 120s chunk
+            # timeout kills healthy streams.
+            kwargs.setdefault("stream_chunk_timeout", 300.0)
         # SiliconFlow: disable thinking — LangChain drops reasoning_content
         # from history, causing error 20015 on multi-turn requests.
         if provider == "siliconflow":
@@ -499,7 +523,11 @@ def get_chat_model(
                 )
             base_url = base_url.rstrip("/")
         elif provider == "minimax":
-            base_url = os.environ.get("MINIMAX_BASE_URL", base_url_default).rstrip("/")
+            # `or` (not `.get(key, default)`): an empty-but-present value
+            # (e.g. a bare `MINIMAX_BASE_URL=` line in .env, loaded by
+            # dotenv/deepeval's autoload) must fall back to the default,
+            # not silently drop base_url and hit api.anthropic.com.
+            base_url = (os.environ.get("MINIMAX_BASE_URL") or base_url_default).rstrip("/")
         else:
             base_url = base_url_default
         if base_url:

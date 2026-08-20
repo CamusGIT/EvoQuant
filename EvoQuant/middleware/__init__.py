@@ -34,6 +34,7 @@ from .scheduler import (
     create_scheduler_middleware,
 )
 from .tool_error_handler import ToolErrorHandlerMiddleware
+from .tool_result_guard import ToolResultGuardMiddleware
 from .tool_selector import create_tool_selector_middleware
 from .utils import disable_thinking
 
@@ -51,6 +52,7 @@ __all__ = [
     "RuntimeContextMiddleware",
     "SchedulerMiddleware",
     "ToolErrorHandlerMiddleware",
+    "ToolResultGuardMiddleware",
     "compute_context_editing_trigger",
     "create_code_interpreter_middleware",
     "create_context_editing_middleware",

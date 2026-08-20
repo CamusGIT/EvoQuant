@@ -307,6 +307,7 @@ def _inject_subagent_middleware(
     from .middleware import (
         ContextOverflowMapperMiddleware,
         ToolErrorHandlerMiddleware,
+        ToolResultGuardMiddleware,
         create_context_editing_middleware,
         create_memory_lifecycle_middleware,
         create_memory_middleware,
@@ -340,6 +341,7 @@ def _inject_subagent_middleware(
             create_context_editing_middleware(chat_model),
             create_runtime_context_middleware(),
             ToolErrorHandlerMiddleware(),
+            ToolResultGuardMiddleware(max_chars=cfg.tool_result_max_chars),
             ContextOverflowMapperMiddleware(),
         ]
         if memory_controls.memory_enabled:
@@ -675,6 +677,7 @@ def _get_default_middleware(
         ContextOverflowMapperMiddleware,
         ModelFallbackMiddleware,
         ToolErrorHandlerMiddleware,
+        ToolResultGuardMiddleware,
         create_code_interpreter_middleware,
         create_context_editing_middleware,
         create_memory_lifecycle_middleware,
@@ -742,6 +745,7 @@ def _get_default_middleware(
         ModelFallbackMiddleware(),
         ContextOverflowMapperMiddleware(),
         ToolErrorHandlerMiddleware(),
+        ToolResultGuardMiddleware(max_chars=cfg.tool_result_max_chars),
         *create_tool_selector_middleware(
             model=tool_selector_model,
             track_stream_selection=not for_async_subagent,
