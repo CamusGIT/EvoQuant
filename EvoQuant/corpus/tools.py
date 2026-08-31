@@ -34,8 +34,12 @@ MAX_SECTION_CHARS = 16000
 MIN_PREFIX_CHARS = 8
 
 # Field name -> weight for relevance scoring (navigator FIELD_WEIGHTS semantics).
+# titleCn (the original Chinese title from the markdown, joined in from
+# index.jsonl) carries the same weight as title — cards are English-dominant
+# and Chinese queries would otherwise miss them entirely.
 FIELD_WEIGHTS: dict[str, int] = {
     "title": 2,
+    "titleCn": 2,
     "keywords": 2,
     "tldr": 1,
     "abstract": 1,
@@ -74,7 +78,11 @@ def _score(record: dict, query_tokens: set[str]) -> float:
 
 
 def _load_cards(corpus_dir: Path) -> list[dict]:
-    """Load one JSON record per cards/*.jsonl file (first non-empty line)."""
+    """Load one JSON record per cards/*.jsonl file (first non-empty line).
+
+    The index's ``titleCn`` (original Chinese title) is joined in by paperId
+    when present, so Chinese queries can find English-dominant cards.
+    """
     cards: list[dict] = []
     for path in sorted((corpus_dir / "cards").glob("*.jsonl")):
         try:
@@ -88,6 +96,28 @@ def _load_cards(corpus_dir: Path) -> list[dict]:
                 break  # card files are single-record; extras are ignored
         except (OSError, json.JSONDecodeError):
             continue
+
+    title_cn: dict[str, str] = {}
+    index_path = corpus_dir / "index.jsonl"
+    if index_path.is_file():
+        try:
+            for line in index_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(rec, dict) and rec.get("titleCn") and rec.get("paperId"):
+                    title_cn[str(rec["paperId"])] = str(rec["titleCn"])
+        except OSError:
+            pass
+    if title_cn:
+        for card in cards:
+            cn = title_cn.get(str(card.get("paperId", "")))
+            if cn:
+                card.setdefault("titleCn", cn)
     return cards
 
 

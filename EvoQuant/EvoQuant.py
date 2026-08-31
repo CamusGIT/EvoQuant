@@ -277,6 +277,29 @@ def _load_mcp_tools_cached(on_progress=None) -> dict[str, list]:
 
 
 # 根据模式提供当前路径，插入进prompt中
+def _agent_md_section() -> str:
+    """AGENT.md contract section: workspace override > repo default > none.
+
+    Workspace AGENT.md lets a project pin agent rules per-workspace; the
+    repo-root file carries the corpus contract. Capped hard so a runaway
+    file can't bloat the system prompt.
+    """
+    for candidate in (
+        _paths_mod.WORKSPACE_ROOT / "AGENT.md",
+        Path(__file__).resolve().parent.parent / "AGENT.md",
+    ):
+        try:
+            if candidate.is_file():
+                text = candidate.read_text(encoding="utf-8", errors="replace").strip()
+                if text:
+                    if len(text) > 4000:
+                        text = text[:4000] + "\n...[AGENT.md truncated]"
+                    return text
+        except OSError:
+            continue
+    return ""
+
+
 def _configured_system_prompt(cfg) -> str:
     # In dangerous mode the agent works on the real filesystem; give it the real
     # cwd so it can use absolute paths instead of the virtual `/` workspace root.
@@ -286,7 +309,10 @@ def _configured_system_prompt(cfg) -> str:
     return get_system_prompt(
         dangerous=cfg.dangerous_mode,
         cwd=real_cwd,
-        extra_sections=[build_corpus_prompt_section(_paths_mod.CORPUS_DIR)],
+        extra_sections=[
+            _agent_md_section(),
+            build_corpus_prompt_section(_paths_mod.CORPUS_DIR),
+        ],
     )
 
 

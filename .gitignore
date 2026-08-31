@@ -35,6 +35,9 @@ bridge/package-lock.json
 # Project specific
 .langgraph_api/
 workspace/
+# Repo corpus: text artifacts committed, broker PDFs are not (copyright)
+corpus/raw/
+
 # Eval snapshot corpus: text artifacts committed, broker PDFs are not
 !tests/evals/fixtures/workspace/
 tests/evals/fixtures/workspace/rawpaper/

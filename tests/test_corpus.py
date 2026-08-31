@@ -310,6 +310,102 @@ class TestPromptSection:
 
 
 # ---------------------------------------------------------------------------
+# migration
+# ---------------------------------------------------------------------------
+
+
+def _legacy_workspace(tmp_path: Path) -> Path:
+    """Fake legacy layout: rawpaper/{中文名}.pdf + markdown/ + wiki/ + manifest."""
+    ws = tmp_path / "ws"
+    (ws / "rawpaper").mkdir(parents=True)
+    (ws / "markdown").mkdir()
+    (ws / "wiki").mkdir()
+    entries = []
+    for card, pdf_bytes in zip(CARDS, [b"%PDF-aaa", b"%PDF-ddd"]):
+        pdf_name = f"20260331-券商-{card['title']}.pdf"
+        (ws / "rawpaper" / pdf_name).write_bytes(pdf_bytes)
+        (ws / "markdown" / f"{card['paperId']}.md").write_text(
+            MD_A if card is CARDS[0] else MD_D, encoding="utf-8"
+        )
+        (ws / "wiki" / f"{card['paperId']}.jsonl").write_text(
+            json.dumps(card, ensure_ascii=False), encoding="utf-8"
+        )
+        entries.append(
+            {
+                "paperId": card["paperId"],
+                "sourcePdf": f"rawpaper/{pdf_name}",
+                "markdownPath": f"markdown/{card['paperId']}.md",
+                "wikiPath": f"wiki/{card['paperId']}.jsonl",
+                "status": "extraction_done",
+            }
+        )
+    (ws / "manifest.jsonl").write_text(
+        "\n".join(json.dumps(e, ensure_ascii=False) for e in entries), encoding="utf-8"
+    )
+    return ws
+
+
+class TestMigrate:
+    def test_layout_and_keys(self, tmp_path):
+        from EvoQuant.corpus.migrate import migrate
+
+        ws = _legacy_workspace(tmp_path)
+        corpus = tmp_path / "corpus"
+        log = migrate(ws, corpus, link=False, prune=False)
+        for card in CARDS:
+            assert (corpus / "raw" / f"{card['paperId']}.pdf").is_file()
+            assert (corpus / "markdown" / f"{card['paperId']}.md").is_file()
+            assert (corpus / "cards" / f"{card['paperId']}.jsonl").is_file()
+        # manifest carries the new join-key paths
+        first = json.loads((corpus / "manifest.jsonl").read_text(encoding="utf-8").splitlines()[0])
+        assert first["corpusPath"]["raw"] == f"raw/{CARDS[0]['paperId']}.pdf"
+
+    def test_derived_brief_and_index(self, tmp_path):
+        from EvoQuant.corpus.migrate import migrate
+
+        corpus = tmp_path / "corpus"
+        migrate(_legacy_workspace(tmp_path), corpus, link=False, prune=False)
+        brief = (corpus / "context_brief.md").read_text(encoding="utf-8")
+        assert "GFlowNet Factor Mining" in brief and "Keywords" in brief
+        index_lines = (corpus / "index.jsonl").read_text(encoding="utf-8").splitlines()
+        assert len(index_lines) == 2
+        assert json.loads(index_lines[0])["paperId"].startswith("aaaa" if "aaaa" in index_lines[0] else "dddd")
+
+    def test_idempotent_rerun(self, tmp_path):
+        from EvoQuant.corpus.migrate import migrate
+
+        ws = _legacy_workspace(tmp_path)
+        corpus = tmp_path / "corpus"
+        migrate(ws, corpus, link=False, prune=False)
+        log2 = migrate(ws, corpus, link=False, prune=False)
+        assert any("KEEP" in line for line in log2)
+
+    def test_dry_run_writes_nothing(self, tmp_path):
+        from EvoQuant.corpus.migrate import migrate
+
+        ws = _legacy_workspace(tmp_path)
+        corpus = tmp_path / "corpus"
+        log = migrate(ws, corpus, link=False, prune=True, dry_run=True)
+        assert not corpus.exists()
+        assert not list(ws.glob("_corpus_migrated_backup_*"))
+        assert any("PRUNE PLAN" in line for line in log)
+
+    def test_prune_moves_not_deletes(self, tmp_path):
+        from EvoQuant.corpus.migrate import migrate
+
+        ws = _legacy_workspace(tmp_path)
+        corpus = tmp_path / "corpus"
+        migrate(ws, corpus, link=False, prune=True)
+        backups = list(ws.glob("_corpus_migrated_backup_*"))
+        assert len(backups) == 1
+        backup = backups[0]
+        assert (backup / "rawpaper").is_dir()
+        assert (backup / "manifest.jsonl").is_file()
+        assert not (ws / "rawpaper").exists()
+        assert not (ws / "manifest.jsonl").exists()
+
+
+# ---------------------------------------------------------------------------
 # integration: composite routing + agent registration
 # ---------------------------------------------------------------------------
 
