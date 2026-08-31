@@ -1,6 +1,6 @@
 # Paper Reading Strategy
 
-Guide for structured paper analysis using local wiki and markdown resources.
+Guide for structured paper analysis over the corpus, using the three native tools. Whole-paper reads are blocked by design — L1 means reading *sections*, not the entire markdown.
 
 ## 3-Level Reading Framework
 
@@ -9,11 +9,9 @@ Guide for structured paper analysis using local wiki and markdown resources.
 **Goal:** Fully understand the method — able to reimplement it.
 
 **Process:**
-1. Read the wiki metadata (title, source, year, keywords, tldr, abstract)
-2. Read the full markdown source for detailed methodology:
-   ```bash
-   python scripts/fetch_paper.py --paper-id <ID> --reading-level L1 --full-stdout
-   ```
+1. Read the card: `paper_read <ID>` (title, source, year, keywords, tldr, abstract, summary fields)
+2. Read the relevant full-text sections verbatim, one call per section:
+   `paper_section(<ID>, heading="方法")` — or `query=` to pick the best-matching section
 3. Study the method and strategy sections in detail:
    - What is the exact formulation / algorithm?
    - What are the inputs, outputs, and intermediate representations?
@@ -30,19 +28,13 @@ Guide for structured paper analysis using local wiki and markdown resources.
 **Goal:** Understand the *why* — motivation, design rationale, tradeoffs, key results.
 
 **Process:**
-1. Read the complete wiki record (including strategy, method, experiment, result):
-   ```bash
-   python scripts/fetch_paper.py --paper-id <ID> --reading-level L2
-   ```
+1. Read the complete card: `paper_read <ID>` — the five summary fields plus the section outline usually settle analytical questions.
 2. Focus on:
    - What problem does this solve, and why does it matter?
    - What is the key insight / intuition?
    - What are the design choices and why were they made?
    - How does this compare to alternative approaches?
-3. Use cross-reference search for context:
-   ```bash
-   python scripts/xref_search.py --paper-id <ID> --direction shared-method
-   ```
+3. For context, run another `paper_search` on the shared method keywords instead of a single paper.
 
 **When to use:** Most papers in your literature survey.
 
@@ -51,10 +43,7 @@ Guide for structured paper analysis using local wiki and markdown resources.
 **Goal:** Know what it is and where it fits in the landscape.
 
 **Process:**
-1. Read metadata only (title, year, source, tldr, abstract):
-   ```bash
-   python scripts/fetch_paper.py --paper-id <ID> --metadata-only
-   ```
+1. Read the one-line rows only: `paper_search "<topic>"` (id | year | source | score | title | tldr).
 2. Note: main contribution, year, source, relation to your work
 
 **When to use:** Quick scanning, staying current with the corpus.
@@ -65,11 +54,11 @@ Guide for structured paper analysis using local wiki and markdown resources.
 
 ```
 Is this paper directly related to my implementation?
-├── Yes → L1 Technical Reading (full markdown)
+├── Yes → L1 Technical Reading (paper_read + paper_section per section)
 └── No
     ├── Is it in my research area / related work?
-    │   ├── Yes → L2 Analytical Reading (full wiki record)
-    │   └── No → L3 Contextual Reading (metadata only)
+    │   ├── Yes → L2 Analytical Reading (paper_read card)
+    │   └── No → L3 Contextual Reading (paper_search rows)
     └── Am I just browsing / monitoring?
         └── L3 Contextual Reading
 ```

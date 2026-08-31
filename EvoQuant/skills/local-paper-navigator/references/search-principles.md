@@ -1,6 +1,6 @@
 # Search Principles
 
-Rules for effective searching over the local wiki/markdown corpus.
+Rules for effective searching over the local corpus (cards + markdown via `paper_search` / `paper_read` / `paper_section`).
 
 ## Query Design Rules
 
