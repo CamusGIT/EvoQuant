@@ -405,6 +405,31 @@ class TestMigrate:
         assert not (ws / "manifest.jsonl").exists()
 
 
+class TestRefreshCLI:
+    def test_refresh_rewrites_derived_and_leaves_manifest(self, tmp_path, monkeypatch, capsys):
+        from EvoQuant.corpus import migrate as migrate_mod
+        from EvoQuant.corpus import refresh
+
+        corpus = tmp_path / "corpus"
+        migrate_mod.migrate(_legacy_workspace(tmp_path), corpus, link=False, prune=False)
+        manifest_before = (corpus / "manifest.jsonl").read_text(encoding="utf-8")
+        (corpus / "context_brief.md").write_text("stale", encoding="utf-8")
+
+        monkeypatch.setattr(refresh, "resolve_corpus_dir", lambda: corpus)
+        assert refresh.main(["someref"]) == 0
+        assert "someref" in capsys.readouterr().out
+        brief = (corpus / "context_brief.md").read_text(encoding="utf-8")
+        assert "GFlowNet Factor Mining" in brief  # stale text was replaced
+        assert (corpus / "manifest.jsonl").read_text(encoding="utf-8") == manifest_before
+
+    def test_refresh_without_corpus_exits_2(self, tmp_path, monkeypatch, capsys):
+        from EvoQuant.corpus import refresh
+
+        monkeypatch.setattr(refresh, "resolve_corpus_dir", lambda: None)
+        assert refresh.main([]) == 2
+        assert "EVOSCIENTIST_CORPUS_DIR" in capsys.readouterr().err
+
+
 # ---------------------------------------------------------------------------
 # integration: composite routing + agent registration
 # ---------------------------------------------------------------------------

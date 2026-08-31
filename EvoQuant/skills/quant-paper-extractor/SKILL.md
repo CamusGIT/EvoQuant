@@ -1,6 +1,6 @@
 ---
 name: quant-paper-extractor
-description: "Convert quantitative research report PDFs to markdown, then extract structured knowledge (paperId, title, year, source, keywords, tldr, abstract, strategy, method, experiment, result) into JSONL files. Use when: processing quant research PDFs, building a quant knowledge base, extracting structured data from reports, or dropping PDFs into rawpaper/. Do NOT use for: academic paper search (use paper-navigator), idea generation (use research-ideation), literature surveys (use research-survey)."
+description: "Convert quantitative research report PDFs to markdown, then extract structured knowledge (paperId, title, year, source, keywords, tldr, abstract, strategy, method, experiment, result) into JSONL paper cards. Writes into the repo corpus (corpus/raw, corpus/markdown, corpus/cards) and refreshes context_brief.md + index.jsonl. Use when: adding quant research PDFs to the knowledge base, extracting structured data from reports. Do NOT use for: academic paper search (use paper-navigator), idea generation (use research-ideation), literature surveys (use research-survey)."
 allowed-tools: "write_file edit_file read_file think_tool execute"
 metadata:
   author: quant-research-team
@@ -10,45 +10,53 @@ metadata:
 
 # Quant Paper Extractor
 
-Batch-convert quantitative research report PDFs (量化研究研报) to structured JSONL records. Two-phase pipeline: PDF → Markdown → JSONL.
+Batch-convert quantitative research report PDFs (量化研究研报) to structured JSONL paper cards. Two-phase pipeline writing into the repo corpus:
 
 ```
-rawpaper/*.pdf
+corpus/raw/{paperId}.pdf
       │
       ▼ Phase 1: PDF → Markdown (pdf_to_markdown.py)
-markdown/{sha256}.md
+corpus/markdown/{paperId}.md
       │
-      ▼ Phase 2: Markdown → JSONL (agent-driven extraction)
-wiki/{sha256}.jsonl
+      ▼ Phase 2: Markdown → card (agent-driven extraction)
+corpus/cards/{paperId}.jsonl
+      │
+      ▼ Phase 3: refresh derived artifacts
+corpus/context_brief.md + corpus/index.jsonl
 ```
 
 ## Setup
 
-Scripts at `scripts/`. Run via `python scripts/<name>.py`.
-
-Install dependencies:
-
-```bash
-pip install -e .
-```
+Scripts at `scripts/`. Run via `python scripts/<name>.py` from this skill's
+directory. Dependencies: `pip install -e .`.
 
 ## Pre-conditions
 
-Working directory must contain these sibling directories:
-
-```
-rawpaper/    ← user places PDF files here
-markdown/    ← auto-created; stores converted markdown files
-wiki/        ← auto-created; stores extracted JSONL files
-```
-
-Create `markdown/` and `wiki/` if they don't exist:
+The corpus lives at the repo root (`corpus/`; override with
+`EVOSCIENTIST_CORPUS_DIR`). Resolve it once and reuse:
 
 ```bash
-mkdir -p markdown/ wiki/
+CORPUS=$(python -c "from EvoQuant.corpus.paths import resolve_corpus_dir; print(resolve_corpus_dir())")
 ```
 
-A `manifest.jsonl` file will be created at the working directory root to track processing state.
+Layout (all three layers share the paperId join key):
+
+```
+$CORPUS/raw/       ← PDFs, renamed to {paperId}.pdf (see Red Line 8)
+$CORPUS/markdown/  ← auto-created; converted markdown
+$CORPUS/cards/     ← auto-created; extracted JSONL cards
+$CORPUS/manifest.jsonl  ← processing-state ledger
+```
+
+**Legacy layouts are dead.** `rawpaper/`, `markdown/`, `wiki/` in a
+workspace are deprecated — if you meet them, point the user at
+`python -m EvoQuant.corpus.migrate` instead of writing there.
+
+`markdown/` is auto-created by Phase 1; create the cards dir up front:
+
+```bash
+mkdir -p "$CORPUS/cards"
+```
 
 ## Phase 1: PDF → Markdown
 
@@ -56,13 +64,13 @@ Run the conversion script (fully automated, no LLM needed):
 
 ```bash
 python scripts/pdf_to_markdown.py \
-  --rawpaper-dir rawpaper/ \
-  --markdown-dir markdown/ \
-  --manifest-path manifest.jsonl
+  --rawpaper-dir "$CORPUS/raw" \
+  --markdown-dir "$CORPUS/markdown" \
+  --manifest-path "$CORPUS/manifest.jsonl"
 ```
 
 This script:
-1. Scans all `.pdf` files in `rawpaper/`
+1. Scans all `.pdf` files in the raw dir (any filename — the hash is the identity)
 2. Computes SHA-256 hash of each PDF's binary content → `paperId`
 3. **Incremental skip**: if `markdown/{paperId}.md` already exists, skip
 4. Extracts text via **three-tier fallback**:
@@ -83,16 +91,16 @@ The agent (you) performs the extraction reasoning. The `extract.py` script prepa
 
 ```bash
 python scripts/manifest.py list \
-  --manifest-path manifest.jsonl --status markdown_done
+  --manifest-path "$CORPUS/manifest.jsonl" --status markdown_done
 ```
 
-Also check `markdown_short` status files. For each file without a corresponding `wiki/{paperId}.jsonl`:
+Also check `markdown_short` status files. For each file without a corresponding `cards/{paperId}.jsonl`:
 
 ### Step 2.2: Prepare extraction context
 
 ```bash
 python scripts/extract.py prepare \
-  --markdown-file markdown/{paperId}.md
+  --markdown-file "$CORPUS/markdown/{paperId}.md"
 ```
 
 This outputs:
@@ -115,7 +123,7 @@ Read the `prepare` output, then use `think_tool` to reason through the extractio
 
 ### Step 2.4: Write the JSONL record
 
-Write a single JSON line to `wiki/{paperId}.jsonl` via `write_file`.
+Write a single JSON line to `$CORPUS/cards/{paperId}.jsonl` via `write_file` (or `python -c` if write_file's sandbox can't reach the corpus root).
 
 Each record must have exactly these 11 fields:
 
@@ -137,7 +145,7 @@ Each record must have exactly these 11 fields:
 
 ```bash
 python scripts/extract.py validate \
-  --record wiki/{paperId}.jsonl
+  --record "$CORPUS/cards/{paperId}.jsonl"
 ```
 
 If validation fails, fix the record and re-validate.
@@ -148,20 +156,25 @@ After successful validation, the manifest is updated automatically. Alternativel
 
 ```bash
 python scripts/manifest.py rebuild \
-  --rawpaper-dir rawpaper/ \
-  --markdown-dir markdown/ \
-  --wiki-dir wiki/ \
-  --manifest-path manifest.jsonl
+  --rawpaper-dir "$CORPUS/raw" \
+  --markdown-dir "$CORPUS/markdown" \
+  --wiki-dir "$CORPUS/cards" \
+  --manifest-path "$CORPUS/manifest.jsonl"
 ```
 
-## Phase 3: Verify & Report
+## Phase 3: Refresh derived artifacts & verify
 
-After all files are processed, validate the entire wiki directory:
+After all cards are written, refresh the derived index/brief so the runtime
+tools see the new papers, then validate the whole cards directory:
 
 ```bash
+python -m EvoQuant.corpus.refresh
 python scripts/extract.py validate \
-  --wiki-dir wiki/ --manifest-path manifest.jsonl
+  --wiki-dir "$CORPUS/cards" --manifest-path "$CORPUS/manifest.jsonl"
 ```
+
+`refresh` is a full recompute over cards/ (milliseconds) — cheap to run
+after every card, and the derived files can never drift.
 
 Then report:
 
@@ -183,6 +196,8 @@ Extraction complete:
 5. **Incremental.** Never re-process a PDF that already has a markdown file, or a markdown that already has a JSONL.
 6. **Quote-or-zero.** The `strategy`, `method`, `experiment`, and `result` fields must each include at least one `[source: "..."]` inline evidence citation. No citation → flag warning.
 7. **If information is not explicitly found, return empty string.** Do not infer.
+8. **One join key.** After a PDF is processed, rename it in `$CORPUS/raw/` to `{paperId}.pdf` (the hash) — raw/, markdown/, cards/ must stay keyed identically. The original filename survives in manifest `sourcePdf`.
+9. **Write only inside the corpus.** Never create `rawpaper/`, `markdown/`, or `wiki/` in a workspace — that layout is deprecated (see AGENT.md).
 
 ## Error Handling
 
