@@ -1,6 +1,6 @@
 data-analysis-agent:
   description: "Analyze experiment outputs: compute metrics, make plots, summarize insights."
-  tools: [think_tool]
+  tools: [think_tool, paper_search, paper_read, paper_section]
   skills: ["/skills/"]
   # Long-running (typically 30-120s for compute + plots). Routed through
   # langgraph dev as an AsyncSubAgent when config.enable_async_subagents is set.

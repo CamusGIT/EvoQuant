@@ -67,6 +67,13 @@ MEMORIES_DIR: Path = (
 )
 MEMORY_DIR = MEMORIES_DIR  # backward compat alias
 
+# Corpus dir: repo-level read-only paper corpus (see corpus/paths.py for the
+# layout and precedence). None when no corpus exists — callers must treat
+# that as "feature absent", never mount empty routes.
+from .corpus.paths import resolve_corpus_dir  # noqa: E402  (needs constants above)
+
+CORPUS_DIR: Path | None = resolve_corpus_dir()
+
 
 # DEPRECATED(0.1.0): remove this migration helper and its call site below.
 def migrate_legacy_sessions_db() -> None:
@@ -159,6 +166,7 @@ def set_workspace_root(path: str | Path) -> None:
         MEMORY_DIR, \
         USER_SKILLS_DIR, \
         MEDIA_DIR, \
+        CORPUS_DIR, \
         _active_workspace
     WORKSPACE_ROOT = Path(path).resolve()
     _active_workspace = WORKSPACE_ROOT
@@ -173,6 +181,9 @@ def set_workspace_root(path: str | Path) -> None:
         WORKSPACE_ROOT / "skills"
     )
     MEDIA_DIR = _env_path("EVOSCIENTIST_MEDIA_DIR") or (WORKSPACE_ROOT / "media")
+    # Corpus is repo-level (not workspace-scoped) but the env var is
+    # re-evaluated here to support late-set environments, matching MEMORIES_DIR.
+    CORPUS_DIR = resolve_corpus_dir()
 
 
 def ensure_dirs() -> None:

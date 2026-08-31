@@ -401,6 +401,7 @@ def get_system_prompt(
     *,
     dangerous: bool = False,
     cwd: str | None = None,
+    extra_sections: list[str] | None = None,
 ) -> str:
     """Generate the complete static system prompt.
 
@@ -413,6 +414,9 @@ def get_system_prompt(
     5. :data:`SHELL_GUIDELINES` (or :data:`SHELL_GUIDELINES_DANGEROUS`)
     6. :data:`DELEGATION_STRATEGY`
     7. :data:`ASYNC_NOTIFICATIONS`
+    8. Any ``extra_sections`` (corpus overview, AGENT.md contract, …) —
+       appended so callers can layer repo-specific context on without
+       touching this module.
 
     Runtime context is injected per-turn by
     :class:`EvoQuant.middleware.RuntimeContextMiddleware`, so dates and
@@ -443,4 +447,6 @@ def get_system_prompt(
         DELEGATION_STRATEGY,
         ASYNC_NOTIFICATIONS,
     ]
+    # Skip empty strings so "corpus absent" costs nothing.
+    sections.extend(s for s in (extra_sections or []) if s)
     return "\n".join(sections)

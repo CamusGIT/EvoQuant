@@ -281,9 +281,12 @@ def _configured_system_prompt(cfg) -> str:
     # In dangerous mode the agent works on the real filesystem; give it the real
     # cwd so it can use absolute paths instead of the virtual `/` workspace root.
     real_cwd = str(_paths_mod.resolve_virtual_path("/")) if cfg.dangerous_mode else None
+    from .corpus.prompt import build_corpus_prompt_section
+
     return get_system_prompt(
         dangerous=cfg.dangerous_mode,
         cwd=real_cwd,
+        extra_sections=[build_corpus_prompt_section(_paths_mod.CORPUS_DIR)],
     )
 
 
@@ -478,18 +481,50 @@ def _maybe_swap_async_subagents(
     return out
 
 
+def _base_tool_registry():
+    """Single source of truth for the base tool set (main agent + subagents).
+
+    Used by ``_build_base_kwargs``, ``load_mcp_and_build_kwargs`` AND the
+    async subagent factory (``subagents/_factory.py``) — three call sites
+    that previously hand-copied the registry and had already drifted.
+    Paper tools are included only when the corpus is available; subagents
+    that name them in their yaml get them resolved from here.
+    """
+    from .corpus.tools import build_paper_tools
+    from .tools import skill_manager, tavily_search, think_tool
+
+    registry = {"think_tool": think_tool}
+    base_tools = [think_tool, skill_manager]
+    if os.environ.get("TAVILY_API_KEY"):
+        registry["tavily_search"] = tavily_search
+    for paper_tool in build_paper_tools(_paths_mod.CORPUS_DIR):
+        registry[paper_tool.name] = paper_tool
+        base_tools.append(paper_tool)
+    return registry, base_tools
+
+
+def _corpus_route():
+    """``("/papers/", CorpusBackend)`` when the corpus exists, else ``None``.
+
+    Mounting an empty route would surface a dead /papers/ tree to the
+    agent; we mount only when there is corpus content to serve.
+    """
+    from .corpus.backend import CorpusBackend
+    from .corpus.paths import corpus_is_available
+
+    if not corpus_is_available(_paths_mod.CORPUS_DIR):
+        return None
+    return "/papers/", CorpusBackend(_paths_mod.CORPUS_DIR)
+
+
 def _build_base_kwargs(
     base_backend, base_middleware, *, cfg=None, chat_model=None, workspace_dir=None
 ):
     """Build agent kwargs *without* MCP (fast, no subprocess spawning)."""
-    from .tools import skill_manager, tavily_search, think_tool
     from .utils import load_subagents
 
     cfg = cfg if cfg is not None else _ensure_config()
-    tool_registry = {"think_tool": think_tool}
-    if os.environ.get("TAVILY_API_KEY"):
-        tool_registry["tavily_search"] = tavily_search
-    base_tools = [think_tool, skill_manager]
+    tool_registry, base_tools = _base_tool_registry()
 
     subs = load_subagents(
         SUBAGENTS_CONFIG,
@@ -534,7 +569,6 @@ def load_mcp_and_build_kwargs(
         chat_model: Explicit chat model to bind instead of
             ``_ensure_chat_model()`` (which would write module globals).
     """
-    from .tools import skill_manager, tavily_search, think_tool
     from .utils import load_subagents
 
     cfg = cfg if cfg is not None else _ensure_config()
@@ -548,10 +582,7 @@ def load_mcp_and_build_kwargs(
             workspace_dir=workspace_dir,
         )
 
-    tool_registry = {"think_tool": think_tool}
-    if os.environ.get("TAVILY_API_KEY"):
-        tool_registry["tavily_search"] = tavily_search
-    base_tools = [think_tool, skill_manager]
+    tool_registry, base_tools = _base_tool_registry()
 
     # Fresh tool registry — start from base tools + MCP tools
     registry = dict(tool_registry)
@@ -631,12 +662,15 @@ def _get_default_backend():
         root_dir=memory_dir,
         virtual_mode=True,
     )
+    routes = {
+        "/skills/": sk_backend,
+        "/memories/": mem_backend,
+    }
+    if corpus_route := _corpus_route():
+        routes[corpus_route[0]] = corpus_route[1]
     return CompositeBackend(
         default=ws_backend,
-        routes={
-            "/skills/": sk_backend,
-            "/memories/": mem_backend,
-        },
+        routes=routes,
     )
 
 
@@ -969,12 +1003,15 @@ def create_cli_agent(
         root_dir=_mem_dir,
         virtual_mode=True,
     )
+    routes = {
+        "/skills/": sk_backend,
+        "/memories/": mem_backend,
+    }
+    if corpus_route := _corpus_route():
+        routes[corpus_route[0]] = corpus_route[1]
     be = CompositeBackend(
         default=ws_backend,
-        routes={
-            "/skills/": sk_backend,
-            "/memories/": mem_backend,
-        },
+        routes=routes,
     )
 
     # Delegate middleware construction to the single source of truth so the

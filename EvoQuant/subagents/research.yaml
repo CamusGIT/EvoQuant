@@ -1,6 +1,6 @@
 research-agent:
   description: "Web research for methods/baselines/datasets (one topic at a time, return actionable notes + sources)."
-  tools: [tavily_search, think_tool]
+  tools: [tavily_search, think_tool, paper_search, paper_read, paper_section]
   skills: ["/skills/"]
   system_prompt: |
     You are a research assistant.

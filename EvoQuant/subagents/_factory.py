@@ -40,6 +40,7 @@ def build_async_subagent_graph(name: str) -> Any:
     from EvoQuant.config import apply_config_to_env, get_effective_config
     from EvoQuant.EvoQuant import (
         SUBAGENTS_CONFIG,
+        _base_tool_registry,
         _ensure_auxiliary_chat_model,
         _ensure_chat_model,
         _ensure_general_purpose_subagent,
@@ -47,7 +48,6 @@ def build_async_subagent_graph(name: str) -> Any:
         _get_default_middleware,
         _inject_subagent_middleware,
     )
-    from EvoQuant.tools import skill_manager, tavily_search, think_tool
     from EvoQuant.utils import load_subagents
 
     # Surface API keys as env vars so downstream SDKs (openai, anthropic, …)
@@ -55,10 +55,9 @@ def build_async_subagent_graph(name: str) -> Any:
     cfg = get_effective_config()
     apply_config_to_env(cfg)
 
-    # Mirror the tool registry constructed in EvoQuant._build_base_kwargs.
-    tool_registry = {"think_tool": think_tool, "skill_manager": skill_manager}
-    if os.environ.get("TAVILY_API_KEY"):
-        tool_registry["tavily_search"] = tavily_search
+    # Shared with the sync build path — never hand-copy the registry here
+    # (it had already drifted from EvoQuant._build_base_kwargs once).
+    tool_registry, _ = _base_tool_registry()
 
     # Use the official loader so resolved tools, prompt_refs, and skills are
     # all wired the same way as the in-process sync version.
