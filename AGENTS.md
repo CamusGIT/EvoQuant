@@ -1,4 +1,4 @@
-# AGENT.md — EvoQuant 语料库契约
+# AGENTS.md — EvoQuant 语料库契约
 
 本文件是 agent 与仓库之间的硬约定：语料库长什么样、怎么读、什么不能碰。
 硬规则的优先级高于任何 skill 的建议。

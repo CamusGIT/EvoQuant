@@ -308,6 +308,23 @@ class TestPromptSection:
         assert extended.startswith(base)
         assert extended.endswith("# EXTRA")
 
+    def test_repo_agents_md_loaded(self):
+        from EvoQuant.EvoQuant import _agent_md_section
+
+        # Real repo carries AGENTS.md (agents.md spec name); the loader
+        # must find it without any configuration.
+        assert "语料库" in _agent_md_section()
+
+    def test_workspace_agents_md_overrides_and_truncates(self, tmp_path, monkeypatch):
+        from EvoQuant import paths as paths_mod
+        from EvoQuant.EvoQuant import _agent_md_section
+
+        (tmp_path / "AGENTS.md").write_text("W" * 5000, encoding="utf-8")
+        monkeypatch.setattr(paths_mod, "WORKSPACE_ROOT", tmp_path)
+        out = _agent_md_section()
+        assert out.startswith("WWW") and "AGENTS.md truncated" in out
+        assert len(out) < 5000
+
 
 # ---------------------------------------------------------------------------
 # migration

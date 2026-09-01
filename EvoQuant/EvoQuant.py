@@ -278,22 +278,25 @@ def _load_mcp_tools_cached(on_progress=None) -> dict[str, list]:
 
 # 根据模式提供当前路径，插入进prompt中
 def _agent_md_section() -> str:
-    """AGENT.md contract section: workspace override > repo default > none.
+    """AGENTS.md contract section: workspace override > repo default > none.
 
-    Workspace AGENT.md lets a project pin agent rules per-workspace; the
-    repo-root file carries the corpus contract. Capped hard so a runaway
-    file can't bloat the system prompt.
+    Follows the AGENTS.md specification (agents.md) so other agent tools
+    reading the repo see the same contract. Workspace AGENTS.md lets a
+    project pin agent rules per-workspace; the repo-root file carries the
+    corpus contract. Injected via extra_sections (not deepagents' memory=
+    middleware) to keep the prompt-cache prefix stable. Capped hard so a
+    runaway file can't bloat the system prompt.
     """
     for candidate in (
-        _paths_mod.WORKSPACE_ROOT / "AGENT.md",
-        Path(__file__).resolve().parent.parent / "AGENT.md",
+        _paths_mod.WORKSPACE_ROOT / "AGENTS.md",
+        Path(__file__).resolve().parent.parent / "AGENTS.md",
     ):
         try:
             if candidate.is_file():
                 text = candidate.read_text(encoding="utf-8", errors="replace").strip()
                 if text:
                     if len(text) > 4000:
-                        text = text[:4000] + "\n...[AGENT.md truncated]"
+                        text = text[:4000] + "\n...[AGENTS.md truncated]"
                     return text
         except OSError:
             continue
