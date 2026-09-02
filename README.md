@@ -231,7 +231,7 @@ EvoQuant was built with reference to **[EvoScientist](https://github.com/EvoScie
 
 We thank the EvoScientist team for open-sourcing their work. The companion skill repository **[EvoSkills](https://github.com/EvoScientist/EvoSkills)** informed the design of several research-workflow skills included here.
 
-If you use EvoScientist in your work, please cite the original project:
+If you use EvoQuant in your work, please also cite the original project it builds upon:
 
 ```bibtex
 @article{evoscientist2026,
