@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 import httpx
-from utils import get_corpus_dir, match_score, tokenize
+from utils import get_papers_dir, match_score, tokenize
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -92,7 +92,7 @@ def _find_local(
     limit: int = 5,
 ) -> list[dict]:
     """Search code-repo/ for local implementations matching a paper."""
-    wd = workspace_dir or get_corpus_dir()
+    wd = workspace_dir or get_papers_dir()
     code_repo_dir = wd / "code-repo"
     if not code_repo_dir.is_dir():
         return []
@@ -334,7 +334,7 @@ def main():
     parser.add_argument(
         "--workspace-dir",
         default=None,
-        help="Corpus root (default: <repo>/corpus; EVOSCIENTIST_CORPUS_DIR overrides)",
+        help="Papers root (default: <repo>/papers; EVOSCIENTIST_PAPERS_DIR overrides)",
     )
     args = parser.parse_args()
 

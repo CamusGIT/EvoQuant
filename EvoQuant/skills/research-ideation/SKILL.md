@@ -90,7 +90,7 @@ The goal should be narrow enough to complete in one research cycle, yet signific
 
 ## Step 2: Literature Grounding (via local-paper-navigator)
 
-**Invoke `local-paper-navigator`** to collect relevant papers from the local wiki corpus. Do NOT skip this step or substitute with general knowledge — ideas must be grounded in real papers.
+**Invoke `local-paper-navigator`** to collect relevant papers from the local papers library. Do NOT skip this step or substitute with general knowledge — ideas must be grounded in real papers.
 
 **CRITICAL: All paper discovery in this step MUST use the `local-paper-navigator` skill and its scripts (local_search, xref_search, similar_papers, snippet_search, etc.). Using WebSearch, WebFetch, or any generic web search tool for finding papers is PROHIBITED.** Generic web search returns blog posts, news articles, and low-quality results — only local-paper-navigator provides the local search, cross-reference, and keyword-similarity infrastructure needed for literature grounding.
 
@@ -367,7 +367,7 @@ Run experiments on representative data. If the approach fails, return to Step 3 
 
 ## Dependency: local-paper-navigator
 
-All paper discovery goes through `local-paper-navigator`. This skill does not search for papers itself. **Using WebSearch, WebFetch, or any generic search tool to find papers is PROHIBITED** — these tools cannot access the local wiki corpus. Always use `local-paper-navigator` and its scripts (local_search, xref_search, similar_papers, snippet_search, etc.) for all paper discovery needs in Steps 2, 3, and 4.
+All paper discovery goes through `local-paper-navigator`. This skill does not search for papers itself. **Using WebSearch, WebFetch, or any generic search tool to find papers is PROHIBITED** — these tools cannot access the local papers library. Always use `local-paper-navigator` and its scripts (local_search, xref_search, similar_papers, snippet_search, etc.) for all paper discovery needs in Steps 2, 3, and 4.
 
 | Step | Requires local-paper-navigator for |
 |------|------------------------------|

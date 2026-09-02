@@ -2,7 +2,7 @@
 
 **An autonomous research agent for quantitative science.**
 
-EvoQuant is a self-evolving AI research agent specialized in **quantitative investment research**. It runs the full research loop autonomously — digesting research reports into structured knowledge, navigating a local literature corpus, generating and ranking research ideas, and executing real factor experiments on offline market data with rigorous IC-style evaluation.
+EvoQuant is a self-evolving AI research agent specialized in **quantitative investment research**. It runs the full research loop autonomously — digesting research reports into structured knowledge, navigating a local papers library, generating and ranking research ideas, and executing real factor experiments on offline market data with rigorous IC-style evaluation.
 
 Where general-purpose "AI scientist" frameworks target broad academic discovery, EvoQuant is **purpose-built for the quant research workflow**: alpha factor research, alpha generation methodology, and portfolio strategy research, with reproducible experiment runtimes and quantitative metrics (IC / ICIR / RANKIC / coverage) as first-class citizens.
 
@@ -55,7 +55,7 @@ flowchart TB
     end
 
     subgraph Workspace["📁 Research Workspace (workdir)"]
-        KB["knowledge base<br/>(markdown corpus · JSONL)"]
+        KB["knowledge base<br/>(markdown papers · JSONL)"]
         EXP["experiments/<br/>(panels · artifacts · results)"]
         CODE["code-repo/<br/>(offline data packages)"]
     end
@@ -83,7 +83,7 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    A["📄 quant-paper-extractor<br/>PDF → markdown → JSONL"] --> B["📚 local-paper-navigator<br/>corpus search · reading"]
+    A["📄 quant-paper-extractor<br/>PDF → markdown → JSONL"] --> B["📚 local-paper-navigator<br/>paper search · reading"]
     B --> C["💡 research-ideation<br/>literature tree · ELO tournament"]
     C --> D["🧪 quant-experiment-runtime<br/>panel · entry point · IC metrics"]
     D --> E["🧠 memory<br/>(what worked / what failed)"]
@@ -91,7 +91,7 @@ flowchart LR
 ```
 
 1. **Ingest** — `quant-paper-extractor` converts quant research report PDFs into structured JSONL records (strategy, method, experiment, result) for the local knowledge base.
-2. **Ground** — `local-paper-navigator` searches the corpus by keyword/abstract/full-text, disambiguates queries, and reads papers with an L1/L2/L3 strategy.
+2. **Ground** — `local-paper-navigator` searches the papers library by keyword/abstract/full-text, disambiguates queries, and reads papers with an L1/L2/L3 strategy.
 3. **Ideate** — `research-ideation` builds challenge-insight trees, generates anchor-first ideas, refines them in persona-driven tracks, and ranks them with an ELO tournament (Final = Novelty + Relevance + Clarity − Difficulty).
 4. **Execute** — `quant-experiment-runtime` discovers offline datasets under `code-repo/`, builds panels, runs a Research Artifact through its Python entry point, and evaluates IC / ICIR / RANKIC / coverage.
 5. **Evolve** — outcomes feed persistent memory, so the next cycle starts from what worked and avoids known dead ends.
@@ -109,7 +109,7 @@ The recommended way to use EvoQuant: **place your quant research report PDFs in 
 ```
 
 - `quant-paper-extractor` converts the corpus incrementally (`rawpaper/*.pdf` → `markdown/` → `wiki/*.jsonl`), tracked by `manifest.jsonl` — re-running only processes new files.
-- This local corpus is the **primary knowledge source of the autonomous research loop**: `research-ideation` grounds every idea in reports retrieved from it via `local-paper-navigator` — by design, generic web search is never used to find papers.
+- This local papers library is the **primary knowledge source of the autonomous research loop**: `research-ideation` grounds every idea in reports retrieved from it via `local-paper-navigator` — by design, generic web search is never used to find papers.
 
 ## 📦 Skills
 
@@ -120,7 +120,7 @@ All skills live under [`EvoQuant/skills/`](./EvoQuant/skills/) and are self-cont
 | Skill | Description |
 |-------|-------------|
 | [`quant-paper-extractor`](./EvoQuant/skills/quant-paper-extractor/) | Convert quant research report PDFs to markdown and structured JSONL records |
-| [`local-paper-navigator`](./EvoQuant/skills/local-paper-navigator/) | Search and read papers from a local markdown/wiki corpus with ranked retrieval |
+| [`local-paper-navigator`](./EvoQuant/skills/local-paper-navigator/) | Search and read papers from a local papers library with ranked retrieval |
 | [`research-ideation`](./EvoQuant/skills/research-ideation/) | Quant-focused ideation: scope selection → literature grounding → ELO-ranked proposals |
 | [`quant-experiment-runtime`](./EvoQuant/skills/quant-experiment-runtime/) | Experiment executor: dataset discovery, panel build, IC/ICIR/RANKIC evaluation |
 | [`research-survey`](./EvoQuant/skills/research-survey/) | Structured literature survey synthesis from collected papers |

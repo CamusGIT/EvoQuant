@@ -1,12 +1,12 @@
 """Middleware capping tool-result size before it enters the message history.
 
 The traced eval baseline (``baseline-round-0``, 2026-08-21) exposed the
-unbounded path: a corpus/document tool returned ~165KB of content, the
+unbounded path: a papers/document tool returned ~165KB of content, the
 message history ballooned past 420KB / 80 messages, and the provider
 rejected the next request with 400 — killing the agent mid-task. The code
 interpreter already caps its own results
 (``code_interpreter_max_result_chars``); this extends the same guard to
-every tool result (file reads, corpus search, sub-agent returns, ...).
+every tool result (file reads, paper search, sub-agent returns, ...).
 
 The cap keeps the head of the result (usually the useful part: headings,
 first rows, summary) and tells the agent the exact omitted size so it can

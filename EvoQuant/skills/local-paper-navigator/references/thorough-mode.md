@@ -126,7 +126,7 @@ Read the across-round pool from Step 4, apply the table, take the action.
 | ≥1 new PERFECT, all high-weight criteria covered | **STOP** → Step 6 |
 | ≥1 new PERFECT, but a high-weight criterion still has 0 PERFECT | **CONTINUE → Round 3 patch** |
 | 0 new PERFECT+GOOD *and* Round 1 had 0 PERFECT | **STOP and re-decompose** — criteria are wrong |
-| Empty recall on every Round 2 query | **STOP** — topic not in corpus |
+| Empty recall on every Round 2 query | **STOP** — topic not in the library |
 
 **ITERATIVE branch:** keep searching while any angle tag has 0 PERFECT+GOOD. Stop when every angle tag has ≥2 PERFECT+GOOD.
 

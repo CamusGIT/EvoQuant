@@ -1,6 +1,6 @@
 # Search Principles
 
-Rules for effective searching over the local corpus (cards + markdown via `paper_search` / `paper_read` / `paper_section`).
+Rules for effective searching over the local papers library (cards + markdown via `paper_search` / `paper_read` / `paper_section`).
 
 ## Query Design Rules
 
@@ -42,9 +42,9 @@ After a round returns few results, diagnose the gap type:
 | Gap Type | Signal | Fix |
 |----------|--------|-----|
 | **Vocabulary drift** | Different community's term for same concept | Try synonyms from the field's terminology |
-| **Dead end** | No papers in corpus cover this sub-topic | Accept the gap, note it in output |
+| **Dead end** | No papers in the library cover this sub-topic | Accept the gap, note it in output |
 | **Over-specific** | Query too narrow | Broaden to the parent concept |
-| **Corpus limit** | Topic exists but not in local wiki | Accept the gap; suggest adding more papers |
+| **Library limit** | Topic exists but not in the papers library | Accept the gap; suggest adding more papers |
 
 ## Domain Terminology
 

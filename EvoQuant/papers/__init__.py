@@ -1,4 +1,4 @@
-"""Corpus: repo-level read-only paper corpus for EvoQuant.
+"""Papers: repo-level read-only papers library for EvoQuant.
 
 Layout (see AGENT.md at the repo root for the agent-facing contract):
 
@@ -10,7 +10,7 @@ Layout (see AGENT.md at the repo root for the agent-facing contract):
       index.jsonl             # derived index (paperId/title/year/source/keywords)
       manifest.jsonl          # extractor state ledger
 
-Agents reach the corpus ONLY through the ``/papers/`` virtual route
-(CorpusBackend) and the ``paper_search``/``paper_read``/``paper_section``
+Agents reach the library ONLY through the ``/papers/`` virtual route
+(PapersBackend) and the ``paper_search``/``paper_read``/``paper_section``
 tools — never via direct filesystem paths or environment variables.
 """

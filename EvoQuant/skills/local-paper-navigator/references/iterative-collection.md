@@ -1,6 +1,6 @@
 # Iterative Collection (Branch 3 State Machine)
 
-Read this only when the user wants **comprehensive coverage** of a topic across the local corpus. For one-shot "find me papers about X", stay in SKILL.md Branch LIST.
+Read this only when the user wants **comprehensive coverage** of a topic across the local papers library. For one-shot "find me papers about X", stay in SKILL.md Branch LIST.
 
 ## Why a state machine
 
@@ -121,5 +121,5 @@ S1 DECOMPOSE → S2 MULTI_SEARCH → S3 CROSSREF_EXPAND → S4 GAP_CHECK → S5 
 
 ## Failure escape hatches
 
-- **All searches return <3 results:** The topic may not be in the local corpus. Accept and report what was found.
+- **All searches return <3 results:** The topic may not be in the local papers library. Accept and report what was found.
 - **Pool > 200 candidates after S3:** Over-searched. Tighten relevance filter, prefer recent papers, advance to S5.

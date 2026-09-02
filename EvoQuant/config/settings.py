@@ -363,7 +363,7 @@ class EvoQuantConfig:
     # benefit). Only the resource budget knobs are user-tunable.
     code_interpreter_timeout: float = 60.0  # seconds per JS eval
     code_interpreter_max_result_chars: int = 10000  # truncate large JSON results
-    # Same guard for EVERY tool result (file reads, corpus search, sub-agent
+    # Same guard for EVERY tool result (file reads, paper search, sub-agent
     # returns) — the eval baseline showed one 165KB document result ballooning
     # the history to a provider-killing 420KB request.
     tool_result_max_chars: int = 24000

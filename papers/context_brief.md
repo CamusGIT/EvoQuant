@@ -1,4 +1,4 @@
-# Corpus brief — 11 papers
+# Papers brief — 11 papers
 
 ## Low-Correlation Volume-Price Factor Mining Strategy Based on GFlowNet (2026, Guojin Securities)
 - id: 0e6d594d6452 — GFlowNet generates diverse low-correlation alpha factors outperforming RL which suffers mode collapse. Daily factors achieve IC median 6.17%; minute-frequency factors achieve IC median 5.83% with long excess return median 7.43%.

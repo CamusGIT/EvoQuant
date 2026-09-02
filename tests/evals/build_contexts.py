@@ -1,6 +1,6 @@
 """Build contexts.json for ``deepeval generate --method contexts``.
 
-Deterministic curation — no chunking/embedding/retrieval/rerank. The corpus
+Deterministic curation — no chunking/embedding/retrieval/rerank. The papers library
 is small and naturally grouped (one paper or one skill = one self-contained
 topic), so each context is assembled by rule:
 

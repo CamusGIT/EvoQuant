@@ -1,6 +1,6 @@
 """The paper reading funnel: paper_search / paper_read / paper_section.
 
-These tools ARE the corpus interface. The ``/papers/`` backend exists to
+These tools ARE the root interface. The ``/papers/`` backend exists to
 block raw paths; these three tools are the designed path through the layers:
 
     paper_search   L3  one line per paper — find candidates, pick paperIds
@@ -24,7 +24,7 @@ from pathlib import Path
 
 from langchain_core.tools import tool
 
-from .paths import corpus_is_available
+from .paths import papers_are_available
 
 #: Hard cap on search rows (AutoSci-style top-K constraint).
 MAX_SEARCH_LIMIT = 15
@@ -77,14 +77,14 @@ def _score(record: dict, query_tokens: set[str]) -> float:
     return total
 
 
-def _load_cards(corpus_dir: Path) -> list[dict]:
+def _load_cards(papers_dir: Path) -> list[dict]:
     """Load one JSON record per cards/*.jsonl file (first non-empty line).
 
     The index's ``titleCn`` (original Chinese title) is joined in by paperId
     when present, so Chinese queries can find English-dominant cards.
     """
     cards: list[dict] = []
-    for path in sorted((corpus_dir / "cards").glob("*.jsonl")):
+    for path in sorted((papers_dir / "cards").glob("*.jsonl")):
         try:
             for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
                 line = line.strip()
@@ -98,7 +98,7 @@ def _load_cards(corpus_dir: Path) -> list[dict]:
             continue
 
     title_cn: dict[str, str] = {}
-    index_path = corpus_dir / "index.jsonl"
+    index_path = papers_dir / "index.jsonl"
     if index_path.is_file():
         try:
             for line in index_path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -132,22 +132,22 @@ def _normalize_paper_id(raw: str) -> str:
     return pid.strip()
 
 
-def _resolve_paper(corpus_dir: Path, raw_id: str) -> tuple[dict, Path] | None | str:
+def _resolve_paper(papers_dir: Path, raw_id: str) -> tuple[dict, Path] | None | str:
     """Find a card by exact or ≥8-char prefix paperId.
 
     Returns ``(card, markdown_path)``, ``None`` (not found), or a string
     (ambiguous prefix, listing the candidates).
     """
-    cards = _load_cards(corpus_dir)
+    cards = _load_cards(papers_dir)
     pid = _normalize_paper_id(raw_id)
     if len(pid) < MIN_PREFIX_CHARS:
         return None
     exact = [c for c in cards if str(c.get("paperId", "")) == pid]
     if exact:
-        return _with_markdown(corpus_dir, exact[0])
+        return _with_markdown(papers_dir, exact[0])
     candidates = [c for c in cards if str(c.get("paperId", "")).startswith(pid)]
     if len(candidates) == 1:
-        return _with_markdown(corpus_dir, candidates[0])
+        return _with_markdown(papers_dir, candidates[0])
     if len(candidates) > 1:
         listing = "\n".join(
             f"- {c['paperId'][:12]}  {c.get('title', '')[:60]}" for c in candidates[:5]
@@ -159,9 +159,9 @@ def _resolve_paper(corpus_dir: Path, raw_id: str) -> tuple[dict, Path] | None | 
     return None
 
 
-def _with_markdown(corpus_dir: Path, card: dict) -> tuple[dict, Path]:
-    md = corpus_dir / "markdown" / f"{card.get('paperId', '')}.md"
-    return card, md if md.is_file() else corpus_dir / "markdown" / "nonexistent.md"
+def _with_markdown(papers_dir: Path, card: dict) -> tuple[dict, Path]:
+    md = papers_dir / "markdown" / f"{card.get('paperId', '')}.md"
+    return card, md if md.is_file() else papers_dir / "markdown" / "nonexistent.md"
 
 
 def _split_sections(markdown_text: str) -> list[tuple[str, str]]:
@@ -195,19 +195,19 @@ def _pick_section(sections: list[tuple[str, str]], heading: str | None, query: s
     return None
 
 
-def build_paper_tools(corpus_dir: str | Path | None) -> list:
-    """Build the paper tools bound to ``corpus_dir``.
+def build_paper_tools(papers_dir: str | Path | None) -> list:
+    """Build the paper tools bound to ``papers_dir``.
 
-    Returns an empty list when the corpus is absent — never mount dead
+    Returns an empty list when the root is absent — never mount dead
     tools that error on every call; the agent should not even see them.
     """
-    if not corpus_dir or not corpus_is_available(corpus_dir):
+    if not papers_dir or not papers_are_available(papers_dir):
         return []
-    corpus = Path(corpus_dir)
+    root = Path(papers_dir)
 
     @tool(parse_docstring=True)
     def paper_search(query: str, limit: int = 8) -> str:
-        """Search the local paper corpus by keywords; one line per paper.
+        """Search the local paper root by keywords; one line per paper.
 
         Returns up to `limit` papers (max 15), each as one line:
         paperId-prefix | year | source | score | title | tldr. Use it to
@@ -224,7 +224,7 @@ def build_paper_tools(corpus_dir: str | Path | None) -> list:
             message when nothing scores above zero.
         """
         limit = max(1, min(int(limit), MAX_SEARCH_LIMIT))
-        cards = _load_cards(corpus)
+        cards = _load_cards(root)
         q = _tokenize(query)
         scored = sorted(
             ((c, _score(c, q)) for c in cards),
@@ -239,7 +239,7 @@ def build_paper_tools(corpus_dir: str | Path | None) -> list:
             )[:15]
             kw_hint = f"Known keywords include: {', '.join(keywords)}." if keywords else ""
             return (
-                f"{header}\nno match. The corpus may genuinely not cover this "
+                f"{header}\nno match. The root may genuinely not cover this "
                 f"topic — say so rather than inventing content. Try broader "
                 f"terms, or read /papers/context_brief.md for what exists. {kw_hint}"
             )
@@ -268,7 +268,7 @@ def build_paper_tools(corpus_dir: str | Path | None) -> list:
             The formatted card and section outline, with a pointer to
             paper_section for verbatim quotes.
         """
-        found = _resolve_paper(corpus, paper_id)
+        found = _resolve_paper(root, paper_id)
         if isinstance(found, str):
             return found
         if found is None:
@@ -326,7 +326,7 @@ def build_paper_tools(corpus_dir: str | Path | None) -> list:
             max_chars: Cap on returned chars (1-16000, default 8000).
         """
         max_chars = max(1, min(int(max_chars), MAX_SECTION_CHARS))
-        found = _resolve_paper(corpus, paper_id)
+        found = _resolve_paper(root, paper_id)
         if isinstance(found, str):
             return found
         if found is None:

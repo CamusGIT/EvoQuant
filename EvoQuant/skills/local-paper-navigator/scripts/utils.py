@@ -3,9 +3,9 @@
 
 Zero network. All operations are local file I/O over the repo papers
 directory (<repo>/papers: cards/, markdown/, manifest.jsonl; override with
-EVOSCIENTIST_CORPUS_DIR or --corpus-dir).
+EVOSCIENTIST_PAPERS_DIR or --papers-dir).
 
-The corpus location is derived from this file's own path, so no
+The papers location is derived from this file's own path, so no
 environment-variable fiddling is needed — and none is honored beyond the
 single documented override. When pointed at a legacy workspace (wiki/
 layout), loaders fall back to wiki/ so old call sites keep working.
@@ -20,42 +20,44 @@ import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Corpus configuration
+# Papers configuration
 # ---------------------------------------------------------------------------
 
-_CORPUS_ENV = "EVOSCIENTIST_CORPUS_DIR"
+_PAPERS_ENV = "EVOSCIENTIST_PAPERS_DIR"
+# Legacy alias kept so existing shell exports keep working.
+_CORPUS_ENV_LEGACY = "EVOSCIENTIST_CORPUS_DIR"
 
 
-def _default_corpus_dir() -> Path:
+def _default_papers_dir() -> Path:
     """env override > <repo>/papers derived from this file's location.
 
     scripts/ -> local-paper-navigator/ -> skills/ -> package/ -> repo root.
     Kept local (no package import): these scripts run on ad-hoc sys.paths.
     """
-    explicit = os.environ.get(_CORPUS_ENV)
+    explicit = os.environ.get(_PAPERS_ENV) or os.environ.get(_CORPUS_ENV_LEGACY)
     if explicit:
         return Path(explicit).resolve()
     return Path(__file__).resolve().parents[4] / "papers"
 
 
-def get_corpus_dir() -> Path:
-    """Resolve the corpus root; warns (never crashes) when missing."""
-    d = _default_corpus_dir()
+def get_papers_dir() -> Path:
+    """Resolve the papers root; warns (never crashes) when missing."""
+    d = _default_papers_dir()
     if not d.is_dir():
         print(
-            f"Warning: corpus dir not found: {d} (set {_CORPUS_ENV} to override)",
+            f"Warning: papers dir not found: {d} (set {_PAPERS_ENV} to override)",
             file=sys.stderr,
         )
     return d
 
 
 def get_workspace_dir() -> Path:
-    """DEPRECATED alias of get_corpus_dir — kept for old imports."""
+    """DEPRECATED alias of get_papers_dir — kept for old imports."""
     print(
-        "Warning: get_workspace_dir is deprecated; use get_corpus_dir.",
+        "Warning: get_workspace_dir is deprecated; use get_papers_dir.",
         file=sys.stderr,
     )
-    return get_corpus_dir()
+    return get_papers_dir()
 
 
 # ---------------------------------------------------------------------------
@@ -63,9 +65,9 @@ def get_workspace_dir() -> Path:
 # ---------------------------------------------------------------------------
 
 
-def load_manifest(corpus_dir: Path | None = None) -> list[dict]:
-    """Read manifest.jsonl from the corpus. Returns list of dicts."""
-    wd = corpus_dir or get_corpus_dir()
+def load_manifest(papers_dir: Path | None = None) -> list[dict]:
+    """Read manifest.jsonl from the papers directory. Returns list of dicts."""
+    wd = papers_dir or get_papers_dir()
     manifest_path = wd / "manifest.jsonl"
     if not manifest_path.exists():
         return []
@@ -82,19 +84,19 @@ def load_manifest(corpus_dir: Path | None = None) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Card JSONL helpers (cards/ in the corpus; wiki/ in legacy workspaces)
+# Card JSONL helpers (cards/ in the papers directory; wiki/ in legacy workspaces)
 # ---------------------------------------------------------------------------
 
 
 def _cards_dir(base: Path) -> Path:
-    """cards/ when present (corpus layout), else wiki/ (legacy layout)."""
+    """cards/ when present (papers layout), else wiki/ (legacy layout)."""
     cards = base / "cards"
     return cards if cards.is_dir() else base / "wiki"
 
 
-def load_all_wiki_records(corpus_dir: Path | None = None) -> list[dict]:
+def load_all_wiki_records(papers_dir: Path | None = None) -> list[dict]:
     """Load all card records (cards/*.jsonl, first line each)."""
-    wd = corpus_dir or get_corpus_dir()
+    wd = papers_dir or get_papers_dir()
     cards_dir = _cards_dir(wd)
     if not cards_dir.is_dir():
         return []
@@ -110,9 +112,9 @@ def load_all_wiki_records(corpus_dir: Path | None = None) -> list[dict]:
     return records
 
 
-def load_wiki_record(paper_id: str, corpus_dir: Path | None = None) -> dict | None:
+def load_wiki_record(paper_id: str, papers_dir: Path | None = None) -> dict | None:
     """Load a single card record by paperId."""
-    wd = corpus_dir or get_corpus_dir()
+    wd = papers_dir or get_papers_dir()
     path = _cards_dir(wd) / f"{paper_id}.jsonl"
     if not path.exists():
         return None
@@ -123,9 +125,9 @@ def load_wiki_record(paper_id: str, corpus_dir: Path | None = None) -> dict | No
         return None
 
 
-def find_markdown_path(paper_id: str, corpus_dir: Path | None = None) -> Path | None:
+def find_markdown_path(paper_id: str, papers_dir: Path | None = None) -> Path | None:
     """Resolve markdown/{paperId}.md path."""
-    wd = corpus_dir or get_corpus_dir()
+    wd = papers_dir or get_papers_dir()
     path = wd / "markdown" / f"{paper_id}.md"
     return path if path.exists() else None
 
@@ -193,17 +195,17 @@ def match_score(text: str, query_tokens: set[str]) -> int:
 
 
 def add_workspace_args(parser: argparse.ArgumentParser) -> None:
-    """Add --corpus-dir (plus the deprecated --workspace-dir) argument."""
+    """Add --papers-dir (plus the deprecated --workspace-dir) argument."""
     parser.add_argument(
-        "--corpus-dir",
+        "--papers-dir",
         default=None,
-        help="Corpus root containing cards/, markdown/, manifest.jsonl "
-        f"(default: ${_CORPUS_ENV} or <repo>/papers)",
+        help="Papers root containing cards/, markdown/, manifest.jsonl "
+        f"(default: ${_PAPERS_ENV} or <repo>/papers)",
     )
     parser.add_argument(
         "--workspace-dir",
         default=None,
-        help="(deprecated legacy wiki/ layout; prefer --corpus-dir)",
+        help="(deprecated legacy wiki/ layout; prefer --papers-dir)",
     )
 
 
@@ -219,17 +221,17 @@ def add_output_args(parser: argparse.ArgumentParser) -> None:
 
 
 def resolve_workspace(args) -> Path:
-    """Resolve the corpus dir from args (--corpus-dir wins) or default."""
-    if hasattr(args, "corpus_dir") and args.corpus_dir:
-        return Path(args.corpus_dir).resolve()
+    """Resolve the papers dir from args (--papers-dir wins) or default."""
+    if hasattr(args, "papers_dir") and args.papers_dir:
+        return Path(args.papers_dir).resolve()
     if hasattr(args, "workspace_dir") and args.workspace_dir:
         print(
             "Warning: --workspace-dir is the deprecated legacy layout; "
-            "prefer --corpus-dir.",
+            "prefer --papers-dir.",
             file=sys.stderr,
         )
         return Path(args.workspace_dir).resolve()
-    return get_corpus_dir()
+    return get_papers_dir()
 
 
 def emit_results(

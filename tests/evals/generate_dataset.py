@@ -35,13 +35,13 @@ SCENARIO = (
 )
 TASK = (
     "End-to-end completion of one self-contained quant research instruction: "
-    "retrieve evidence from the local corpus, or design a factor/experiment, "
+    "retrieve evidence from the local papers library, or design a factor/experiment, "
     "or run analysis code on local data, and report concrete metrics or "
     "findings, without asking the user questions mid-run."
 )
 INPUT_FORMAT = (
     "A single imperative research instruction stating the topic, local-data "
-    "constraints (which corpus or files to use), and the expected deliverable; "
+    "constraints (which papers or files to use), and the expected deliverable; "
     "completable unattended in one session."
 )
 EXPECTED_OUTPUT_FORMAT = (

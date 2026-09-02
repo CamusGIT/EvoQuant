@@ -1,6 +1,6 @@
-"""CorpusBackend: a read-only, filtered view over the paper corpus.
+"""PapersBackend: a read-only, filtered view over the papers library.
 
-Mounted at the ``/papers/`` virtual route. The corpus holds three layers
+Mounted at the ``/papers/`` virtual route. The library holds three layers
 with different access policies:
 
     /papers/cards/**        readable    — paper cards, the default layer
@@ -55,11 +55,11 @@ _RAW_BLOCKED = (
     "and paper_section(paper_id, heading) reaches any section verbatim."
 )
 _WRITE_BLOCKED = (
-    "The paper corpus is read-only (it is shared reference data, not "
+    "The papers library is read-only (it is shared reference data, not "
     "workspace state). Write experiments to the workspace instead."
 )
 _GLOBAL_GREP_BLOCKED_HINT = (
-    " (Global corpus search covers cards and index files only; to search "
+    " (Global paper search covers cards and index files only; to search "
     "full texts use paper_search.)"
 )
 
@@ -82,11 +82,11 @@ def _in_layer(path: str, layer: str) -> bool:
     return path == f"/{layer}" or path.startswith(f"/{layer}/")
 
 
-class CorpusBackend(FilesystemBackend):
-    """Read-only filtered view over ``corpus_dir`` for the /papers/ route."""
+class PapersBackend(FilesystemBackend):
+    """Read-only filtered view over ``papers_dir`` for the /papers/ route."""
 
-    def __init__(self, corpus_dir: str | Path):
-        super().__init__(root_dir=str(corpus_dir), virtual_mode=True)
+    def __init__(self, papers_dir: str | Path):
+        super().__init__(root_dir=str(papers_dir), virtual_mode=True)
 
     # ------------------------------------------------------------------
     # Reads: cards + root files pass through; markdown/raw redirect.

@@ -1,4 +1,4 @@
-"""The corpus system-prompt section: what the library holds, how to read it.
+"""The library system-prompt section: what the library holds, how to read it.
 
 Injected ONCE at agent build time (static concatenation), not per-turn —
 per-turn injection would sit after the volatile tail and kill the prompt
@@ -18,9 +18,9 @@ from .tools import _load_cards
 #: Hard cap on the injected brief (chars).
 BRIEF_MAX_CHARS = 4000
 
-_RULES = """# Paper Corpus
+_RULES = """# Papers Library
 
-A local corpus of quantitative research reports is mounted read-only at
+A local library of quantitative research reports is mounted read-only at
 /papers/ and exposed through three tools — this is the ONLY supported way
 to consult it:
 
@@ -38,13 +38,13 @@ Hard rules:
 4. Cite papers by the first 8+ chars of their paperId (plus title), so
    claims stay traceable to a card.
 
-## Corpus overview (context_brief)
+## Papers overview (context_brief)
 """
 
 
-def _brief_from_cards(corpus_dir: Path) -> str:
+def _brief_from_cards(papers_dir: Path) -> str:
     """Regenerate a brief on the fly when context_brief.md is missing."""
-    cards = _load_cards(corpus_dir)
+    cards = _load_cards(papers_dir)
     if not cards:
         return ""
     cards = sorted(cards, key=lambda c: str(c.get("year", "")), reverse=True)
@@ -62,16 +62,16 @@ def _brief_from_cards(corpus_dir: Path) -> str:
     return "\n".join(lines)
 
 
-def build_corpus_prompt_section(corpus_dir: str | Path | None) -> str:
-    """Build the corpus prompt section; empty string when corpus is absent.
+def build_papers_prompt_section(papers_dir: str | Path | None) -> str:
+    """Build the library prompt section; empty string when the library is absent.
 
     Prefers the curated ``context_brief.md``; falls back to a cards-derived
     brief (extraction may have outgrown the file). The brief is truncated
     at BRIEF_MAX_CHARS so the section stays a bounded add-on.
     """
-    if not corpus_dir:
+    if not papers_dir:
         return ""
-    root = Path(corpus_dir)
+    root = Path(papers_dir)
     brief_path = root / "context_brief.md"
     brief = ""
     if brief_path.is_file():

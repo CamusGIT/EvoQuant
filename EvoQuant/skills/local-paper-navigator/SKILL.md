@@ -10,7 +10,7 @@ metadata:
 
 # Local Paper Navigator
 
-Find and read papers from the local corpus via the **three native tools**. No scripts, no environment variables — the corpus is already mounted and the tools resolve it themselves.
+Find and read papers from the local papers library via the **three native tools**. No scripts, no environment variables — the library is already mounted and the tools resolve it themselves.
 
 ```
 paper_search    L3  one line per paper — find candidates, pick paperIds
@@ -29,7 +29,7 @@ Whole-paper reads are blocked by design (`/papers/markdown/**` and `/papers/raw/
 3. `paper_section(paper_id, heading|query)` — only when you must quote the full text verbatim.
 4. Stop. Cite with the paperId prefix (first 8+ chars).
 
-Empty search → the tool says so honestly. Report "not in corpus" rather than widening into fabrication; try one rephrased query (English ↔ Chinese — cards match Chinese titles) before concluding.
+Empty search → the tool says so honestly. Report "not in the library" rather than widening into fabrication; try one rephrased query (English ↔ Chinese — cards match Chinese titles) before concluding.
 
 ## Reading discipline
 
@@ -59,7 +59,7 @@ Defaults: L3 before L2 before L1. Escalate only when the current level cannot an
 
 ## Legacy scripts (compatibility only)
 
-`scripts/` still work and now default to the corpus root (`--corpus-dir`, or `EVOSCIENTIST_CORPUS_DIR`; `--workspace-dir` is deprecated). The native tools above replaced them for search/read — reach for a script only when it does something the tools don't:
+`scripts/` still work and now default to the papers root (`--papers-dir`, or `EVOSCIENTIST_PAPERS_DIR`; `--workspace-dir` is deprecated). The native tools above replaced them for search/read — reach for a script only when it does something the tools don't:
 
 | Need | Script |
 |---|---|

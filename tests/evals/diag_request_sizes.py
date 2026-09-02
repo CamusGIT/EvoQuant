@@ -63,7 +63,7 @@ GOLDEN_INPUT = (
     "economic hypothesis, a precise construction formula, data "
     "requirements, a validation plan (rank IC / ICIR by month, decile "
     "long-short backtest, turnover-cost sensitivity), and known failure "
-    "modes. This task does not require the local corpus — reason from "
+    "modes. This task does not require the local papers library — reason from "
     "first principles and standard A-share market microstructure. Write "
     "the document as a markdown file in the workspace and summarize it "
     "in your reply."

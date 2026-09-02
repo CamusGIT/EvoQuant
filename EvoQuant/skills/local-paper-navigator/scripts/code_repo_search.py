@@ -13,7 +13,7 @@ import json
 import sys
 from pathlib import Path
 
-from utils import get_corpus_dir, match_score, tokenize
+from utils import get_papers_dir, match_score, tokenize
 
 
 def search_code_repo(
@@ -23,7 +23,7 @@ def search_code_repo(
     limit: int = 5,
 ) -> list[dict]:
     """Search local code-repo metadata by keyword or paper ID."""
-    wd = workspace_dir or get_corpus_dir()
+    wd = workspace_dir or get_papers_dir()
     code_repo_dir = wd / "code-repo"
     if not code_repo_dir.is_dir():
         print(
@@ -118,7 +118,7 @@ def main():
     parser.add_argument(
         "--workspace-dir",
         default=None,
-        help="Corpus root (default: <repo>/corpus; EVOSCIENTIST_CORPUS_DIR overrides)",
+        help="Papers root (default: <repo>/papers; EVOSCIENTIST_PAPERS_DIR overrides)",
     )
     args = parser.parse_args()
 

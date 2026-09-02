@@ -1,6 +1,6 @@
 # Paper Reading Strategy
 
-Guide for structured paper analysis over the corpus, using the three native tools. Whole-paper reads are blocked by design — L1 means reading *sections*, not the entire markdown.
+Guide for structured paper analysis over the papers library, using the three native tools. Whole-paper reads are blocked by design — L1 means reading *sections*, not the entire markdown.
 
 ## 3-Level Reading Framework
 
@@ -46,7 +46,7 @@ Guide for structured paper analysis over the corpus, using the three native tool
 1. Read the one-line rows only: `paper_search "<topic>"` (id | year | source | score | title | tldr).
 2. Note: main contribution, year, source, relation to your work
 
-**When to use:** Quick scanning, staying current with the corpus.
+**When to use:** Quick scanning, staying current with the library.
 
 ---
 

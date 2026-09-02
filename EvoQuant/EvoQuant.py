@@ -283,7 +283,7 @@ def _agent_md_section() -> str:
     Follows the AGENTS.md specification (agents.md) so other agent tools
     reading the repo see the same contract. Workspace AGENTS.md lets a
     project pin agent rules per-workspace; the repo-root file carries the
-    corpus contract. Injected via extra_sections (not deepagents' memory=
+    root contract. Injected via extra_sections (not deepagents' memory=
     middleware) to keep the prompt-cache prefix stable. Capped hard so a
     runaway file can't bloat the system prompt.
     """
@@ -307,14 +307,14 @@ def _configured_system_prompt(cfg) -> str:
     # In dangerous mode the agent works on the real filesystem; give it the real
     # cwd so it can use absolute paths instead of the virtual `/` workspace root.
     real_cwd = str(_paths_mod.resolve_virtual_path("/")) if cfg.dangerous_mode else None
-    from .corpus.prompt import build_corpus_prompt_section
+    from .papers.prompt import build_papers_prompt_section
 
     return get_system_prompt(
         dangerous=cfg.dangerous_mode,
         cwd=real_cwd,
         extra_sections=[
             _agent_md_section(),
-            build_corpus_prompt_section(_paths_mod.CORPUS_DIR),
+            build_papers_prompt_section(_paths_mod.PAPERS_DIR),
         ],
     )
 
@@ -516,34 +516,34 @@ def _base_tool_registry():
     Used by ``_build_base_kwargs``, ``load_mcp_and_build_kwargs`` AND the
     async subagent factory (``subagents/_factory.py``) — three call sites
     that previously hand-copied the registry and had already drifted.
-    Paper tools are included only when the corpus is available; subagents
+    Paper tools are included only when the root is available; subagents
     that name them in their yaml get them resolved from here.
     """
-    from .corpus.tools import build_paper_tools
+    from .papers.tools import build_paper_tools
     from .tools import skill_manager, tavily_search, think_tool
 
     registry = {"think_tool": think_tool}
     base_tools = [think_tool, skill_manager]
     if os.environ.get("TAVILY_API_KEY"):
         registry["tavily_search"] = tavily_search
-    for paper_tool in build_paper_tools(_paths_mod.CORPUS_DIR):
+    for paper_tool in build_paper_tools(_paths_mod.PAPERS_DIR):
         registry[paper_tool.name] = paper_tool
         base_tools.append(paper_tool)
     return registry, base_tools
 
 
-def _corpus_route():
-    """``("/papers/", CorpusBackend)`` when the corpus exists, else ``None``.
+def _papers_route():
+    """``("/papers/", PapersBackend)`` when the root exists, else ``None``.
 
     Mounting an empty route would surface a dead /papers/ tree to the
-    agent; we mount only when there is corpus content to serve.
+    agent; we mount only when there is root content to serve.
     """
-    from .corpus.backend import CorpusBackend
-    from .corpus.paths import corpus_is_available
+    from .papers.backend import PapersBackend
+    from .papers.paths import papers_are_available
 
-    if not corpus_is_available(_paths_mod.CORPUS_DIR):
+    if not papers_are_available(_paths_mod.PAPERS_DIR):
         return None
-    return "/papers/", CorpusBackend(_paths_mod.CORPUS_DIR)
+    return "/papers/", PapersBackend(_paths_mod.PAPERS_DIR)
 
 
 def _build_base_kwargs(
@@ -695,8 +695,8 @@ def _get_default_backend():
         "/skills/": sk_backend,
         "/memories/": mem_backend,
     }
-    if corpus_route := _corpus_route():
-        routes[corpus_route[0]] = corpus_route[1]
+    if papers_route := _papers_route():
+        routes[papers_route[0]] = papers_route[1]
     return CompositeBackend(
         default=ws_backend,
         routes=routes,
@@ -1036,8 +1036,8 @@ def create_cli_agent(
         "/skills/": sk_backend,
         "/memories/": mem_backend,
     }
-    if corpus_route := _corpus_route():
-        routes[corpus_route[0]] = corpus_route[1]
+    if papers_route := _papers_route():
+        routes[papers_route[0]] = papers_route[1]
     be = CompositeBackend(
         default=ws_backend,
         routes=routes,

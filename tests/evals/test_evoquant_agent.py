@@ -352,7 +352,7 @@ def _run_traced(golden_input: str, workspace: Path, run_async) -> str:
 def test_evoquant_single_turn(
     golden: Golden, tmp_path: Path, run_async, trace_metrics
 ):
-    # Fixed corpus + a clean write area per run: copy the snapshot, never
+    # Fixed papers + a clean write area per run: copy the snapshot, never
     # mutate it (also keeps xdist workers independent).
     ws = tmp_path / "ws"
     shutil.copytree(FIXTURE_WS, ws)

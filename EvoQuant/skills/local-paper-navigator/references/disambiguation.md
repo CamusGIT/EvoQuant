@@ -53,7 +53,7 @@ Show the user what was resolved before proceeding:
 ## When disambiguation fails
 
 If local search also returns nothing:
-- The term may not be in the local wiki corpus — ask the user for source or context
+- The term may not be in the local papers library — ask the user for source or context
 - It may be a typo — try near-spellings or ask user to confirm
 - The paper may not have been extracted yet — suggest running `quant-paper-extractor` first
 

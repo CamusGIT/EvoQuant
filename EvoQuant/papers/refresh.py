@@ -1,9 +1,9 @@
-"""Incremental corpus refresh: rebuild the derived artifacts after ingestion.
+"""Incremental papers refresh: rebuild the derived artifacts after ingestion.
 
-Thin CLI over :mod:`EvoQuant.corpus.migrate`'s pure functions — called by
+Thin CLI over :mod:`EvoQuant.papers.migrate`'s pure functions — called by
 the quant-paper-extractor skill after each new card lands:
 
-    python -m EvoQuant.corpus.refresh [paperId ...]
+    python -m EvoQuant.papers.refresh [paperId ...]
 
 ``context_brief.md`` and ``index.jsonl`` are cheap full recomputes over
 cards/ (milliseconds at current scale); the optional paperId arguments are
@@ -17,18 +17,18 @@ import sys
 from pathlib import Path
 
 from .migrate import refresh_derived
-from .paths import resolve_corpus_dir
+from .paths import resolve_papers_dir
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    corpus_dir = resolve_corpus_dir()
-    if corpus_dir is None:
-        print("No corpus directory found; set EVOSCIENTIST_CORPUS_DIR.", file=sys.stderr)
+    papers_dir = resolve_papers_dir()
+    if papers_dir is None:
+        print("No papers directory found; set EVOSCIENTIST_PAPERS_DIR.", file=sys.stderr)
         return 2
-    refresh_derived(Path(corpus_dir))
+    refresh_derived(Path(papers_dir))
     note = f" (noted: {', '.join(argv)})" if argv else ""
-    print(f"refreshed context_brief.md + index.jsonl in {corpus_dir}{note}")
+    print(f"refreshed context_brief.md + index.jsonl in {papers_dir}{note}")
     return 0
 
 

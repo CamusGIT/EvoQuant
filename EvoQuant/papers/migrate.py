@@ -1,21 +1,21 @@
-"""One-shot migration: workspace legacy layout → repo corpus layout.
+"""One-shot migration: workspace legacy layout → repo root layout.
 
 Moves (hard-links when possible, never deletes until asked):
 
-    workspace/rawpaper/{中文名}.pdf   →  corpus/raw/{paperId}.pdf
-    workspace/markdown/{paperId}.md   →  corpus/markdown/{paperId}.md
-    workspace/wiki/{paperId}.jsonl    →  corpus/cards/{paperId}.jsonl
-    workspace/manifest.jsonl          →  corpus/manifest.jsonl (+ corpusPath)
+    workspace/rawpaper/{中文名}.pdf   →  root/raw/{paperId}.pdf
+    workspace/markdown/{paperId}.md   →  root/markdown/{paperId}.md
+    workspace/wiki/{paperId}.jsonl    →  root/cards/{paperId}.jsonl
+    workspace/manifest.jsonl          →  root/manifest.jsonl (+ papersPath)
 
 then derives ``context_brief.md`` and ``index.jsonl``. With ``prune=True``
-the legacy trio is moved into ``workspace/_corpus_migrated_backup_<date>/``
+the legacy trio is moved into ``workspace/_papers_migrated_backup_<date>/``
 (moved, not deleted).
 
 The paperId rename is the point: PDFs stop being addressed by Chinese
 filenames agents had to guess, and every layer (pdf/markdown/card) shares
 one join key.
 
-Run: ``python -m EvoQuant.corpus.migrate --workspace-dir ... [--dry-run]``
+Run: ``python -m EvoQuant.papers.migrate --workspace-dir ... [--dry-run]``
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from .paths import corpus_is_available
+from .paths import papers_are_available
 from .tools import _load_cards
 
 _LEGACY_DIRS = ("rawpaper", "markdown", "wiki")
@@ -62,11 +62,11 @@ def _load_manifest(workspace_dir: Path) -> list[dict]:
     return entries
 
 
-def build_context_brief(corpus_dir: Path) -> str:
+def build_context_brief(papers_dir: Path) -> str:
     """Rules-only brief (no LLM): one entry per paper, year-desc, kw cloud."""
-    cards = _load_cards(corpus_dir)
+    cards = _load_cards(papers_dir)
     cards = sorted(cards, key=lambda c: str(c.get("year", "")), reverse=True)
-    lines = [f"# Corpus brief — {len(cards)} papers"]
+    lines = [f"# Papers brief — {len(cards)} papers"]
     for card in cards[:20]:
         tldr = str(card.get("tldr", "")).replace("\n", " ")
         lines.append(
@@ -86,9 +86,9 @@ def build_context_brief(corpus_dir: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _markdown_title_cn(corpus_dir: Path, paper_id: str) -> str:
+def _markdown_title_cn(papers_dir: Path, paper_id: str) -> str:
     """Original Chinese title: first ``# `` line of the markdown, minus .pdf."""
-    md = corpus_dir / "markdown" / f"{paper_id}.md"
+    md = papers_dir / "markdown" / f"{paper_id}.md"
     if not md.is_file():
         return ""
     try:
@@ -104,7 +104,7 @@ def _markdown_title_cn(corpus_dir: Path, paper_id: str) -> str:
     return ""
 
 
-def build_index(corpus_dir: Path) -> str:
+def build_index(papers_dir: Path) -> str:
     """Derived index.jsonl content: one compact record per card.
 
     ``titleCn`` (the markdown's original heading) is extracted here once
@@ -112,14 +112,14 @@ def build_index(corpus_dir: Path) -> str:
     find cards whose summaries are English.
     """
     records = []
-    for card in _load_cards(corpus_dir):
+    for card in _load_cards(papers_dir):
         paper_id = str(card.get("paperId", ""))
         records.append(
             json.dumps(
                 {
                     "paperId": paper_id,
                     "title": card.get("title", ""),
-                    "titleCn": _markdown_title_cn(corpus_dir, paper_id),
+                    "titleCn": _markdown_title_cn(papers_dir, paper_id),
                     "year": card.get("year"),
                     "source": card.get("source", ""),
                     "keywords": card.get("keywords") or [],
@@ -130,13 +130,13 @@ def build_index(corpus_dir: Path) -> str:
     return "\n".join(records) + ("\n" if records else "")
 
 
-def refresh_derived(corpus_dir: Path) -> None:
+def refresh_derived(papers_dir: Path) -> None:
     """(Re)write context_brief.md and index.jsonl from cards/."""
-    (corpus_dir / "context_brief.md").write_text(
-        build_context_brief(corpus_dir), encoding="utf-8"
+    (papers_dir / "context_brief.md").write_text(
+        build_context_brief(papers_dir), encoding="utf-8"
     )
-    (corpus_dir / "index.jsonl").write_text(
-        build_index(corpus_dir), encoding="utf-8"
+    (papers_dir / "index.jsonl").write_text(
+        build_index(papers_dir), encoding="utf-8"
     )
 
 
@@ -170,22 +170,22 @@ def _transfer(src: Path, dst: Path, *, link: bool, dry_run: bool, log: list[str]
 
 def migrate(
     workspace_dir: str | Path,
-    corpus_dir: str | Path,
+    papers_dir: str | Path,
     *,
     link: bool = True,
     prune: bool = True,
     dry_run: bool = False,
 ) -> list[str]:
-    """Migrate the legacy workspace trio into the corpus; returns the log."""
+    """Migrate the legacy workspace trio into the root; returns the log."""
     workspace = Path(workspace_dir)
-    corpus = Path(corpus_dir)
+    root = Path(papers_dir)
     manifest = _load_manifest(workspace)
     done = [m for m in manifest if m.get("status") == "extraction_done"]
     log = [f"manifest: {len(done)}/{len(manifest)} entries extraction_done"]
 
     if not dry_run:
         for sub in ("raw", "markdown", "cards"):
-            (corpus / sub).mkdir(parents=True, exist_ok=True)
+            (root / sub).mkdir(parents=True, exist_ok=True)
 
     new_manifest_lines = []
     for entry in done:
@@ -193,21 +193,21 @@ def migrate(
         if not paper_id:
             continue
         src_pdf = workspace / str(entry.get("sourcePdf", ""))
-        _transfer(src_pdf, corpus / "raw" / f"{paper_id}.pdf", link=link, dry_run=dry_run, log=log)
+        _transfer(src_pdf, root / "raw" / f"{paper_id}.pdf", link=link, dry_run=dry_run, log=log)
         md_rel = str(entry.get("markdownPath", "")).removeprefix("markdown/")
         _transfer(
             workspace / "markdown" / md_rel,
-            corpus / "markdown" / f"{paper_id}.md",
+            root / "markdown" / f"{paper_id}.md",
             link=link, dry_run=dry_run, log=log,
         )
         wiki_rel = str(entry.get("wikiPath", "")).removeprefix("wiki/")
         _transfer(
             workspace / "wiki" / wiki_rel,
-            corpus / "cards" / f"{paper_id}.jsonl",
+            root / "cards" / f"{paper_id}.jsonl",
             link=link, dry_run=dry_run, log=log,
         )
         record = dict(entry)
-        record["corpusPath"] = {
+        record["papersPath"] = {
             "raw": f"raw/{paper_id}.pdf",
             "markdown": f"markdown/{paper_id}.md",
             "card": f"cards/{paper_id}.jsonl",
@@ -215,11 +215,11 @@ def migrate(
         new_manifest_lines.append(json.dumps(record, ensure_ascii=False))
 
     if not dry_run and new_manifest_lines:
-        (corpus / "manifest.jsonl").write_text(
+        (root / "manifest.jsonl").write_text(
             "\n".join(new_manifest_lines) + "\n", encoding="utf-8"
         )
-    if not dry_run and corpus_is_available(corpus):
-        refresh_derived(corpus)
+    if not dry_run and papers_are_available(root):
+        refresh_derived(root)
         log.append("WROTE context_brief.md + index.jsonl")
 
     if prune:
@@ -229,9 +229,9 @@ def migrate(
         if not legacy:
             log.append("PRUNE nothing to move (already migrated?)")
         elif dry_run:
-            log.append(f"PRUNE PLAN move {legacy} -> workspace/_corpus_migrated_backup_<date>/")
+            log.append(f"PRUNE PLAN move {legacy} -> workspace/_papers_migrated_backup_<date>/")
         else:
-            backup = workspace / f"_corpus_migrated_backup_{date.today():%Y%m%d}"
+            backup = workspace / f"_papers_migrated_backup_{date.today():%Y%m%d}"
             backup.mkdir(parents=True, exist_ok=True)
             for item in legacy:
                 shutil.move(str(workspace / item), str(backup / item))
@@ -243,19 +243,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace-dir", required=True, help="legacy workspace root")
     parser.add_argument(
-        "--corpus-dir",
+        "--papers-dir",
         default=None,
-        help="corpus root (default: resolve_corpus_dir(), i.e. <repo>/corpus)",
+        help="root root (default: resolve_papers_dir(), i.e. <repo>/root)",
     )
     parser.add_argument("--no-link", action="store_true", help="copy instead of hard-link")
     parser.add_argument("--no-prune", action="store_true", help="keep legacy files in place")
     parser.add_argument("--dry-run", action="store_true", help="plan only, write nothing")
     args = parser.parse_args(argv)
 
-    corpus_dir = Path(args.corpus_dir) if args.corpus_dir else resolve_corpus_dir_or_fail()
+    papers_dir = Path(args.papers_dir) if args.papers_dir else resolve_papers_dir_or_fail()
     log = migrate(
         args.workspace_dir,
-        corpus_dir,
+        papers_dir,
         link=not args.no_link,
         prune=not args.no_prune,
         dry_run=args.dry_run,
@@ -264,12 +264,12 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def resolve_corpus_dir_or_fail() -> Path:
-    from .paths import resolve_corpus_dir
+def resolve_papers_dir_or_fail() -> Path:
+    from .paths import resolve_papers_dir
 
-    resolved = resolve_corpus_dir()
+    resolved = resolve_papers_dir()
     if resolved is None:
-        print("No corpus directory found; pass --corpus-dir.", file=sys.stderr)
+        print("No root directory found; pass --papers-dir.", file=sys.stderr)
         raise SystemExit(2)
     return resolved
 

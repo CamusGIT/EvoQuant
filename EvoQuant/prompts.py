@@ -414,7 +414,7 @@ def get_system_prompt(
     5. :data:`SHELL_GUIDELINES` (or :data:`SHELL_GUIDELINES_DANGEROUS`)
     6. :data:`DELEGATION_STRATEGY`
     7. :data:`ASYNC_NOTIFICATIONS`
-    8. Any ``extra_sections`` (corpus overview, AGENT.md contract, …) —
+    8. Any ``extra_sections`` (papers overview, AGENT.md contract, …) —
        appended so callers can layer repo-specific context on without
        touching this module.
 
@@ -447,6 +447,6 @@ def get_system_prompt(
         DELEGATION_STRATEGY,
         ASYNC_NOTIFICATIONS,
     ]
-    # Skip empty strings so "corpus absent" costs nothing.
+    # Skip empty strings so "papers library absent" costs nothing.
     sections.extend(s for s in (extra_sections or []) if s)
     return "\n".join(sections)

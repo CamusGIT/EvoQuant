@@ -25,9 +25,9 @@ _RIGOR_CRITERIA = (
     "Evaluate whether the output demonstrates rigorous quantitative-research "
     "practice: claims about factors, signals, data or metrics (IC/ICIR/RANKIC, "
     "coverage, returns, correlations) are supported by the work actually "
-    "performed or by retrieved corpus evidence; methodology, assumptions and "
+    "performed or by retrieved paper evidence; methodology, assumptions and "
     "limitations are stated; numbers are not fabricated or asserted without a "
-    "computation or source; the agent is honest when the local corpus lacks "
+    "computation or source; the agent is honest when the local papers library lacks "
     "the needed evidence instead of inventing papers or results."
 )
 
