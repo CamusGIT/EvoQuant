@@ -135,3 +135,65 @@ Round 2 焦点（仅提案）：
 - judge 侧：invalid-JSON 4 起——评估 judge 模型稳定性或加 JSON 修复重试。
 
 红线自查：阈值全 0.5 未动；golden 12 未删未改；应用模型 zai-code/glm-5.2 未换；evo10 schema 零删减（G087 缺键保持）；本轮应用侧零改动；未执行任何迭代。
+
+## Round 2 — 四次迭代（评测基建 / 评测集 / agent / 全量复跑）
+
+分支 `round-2-iterations`，四 commit：544674c（迭代 1 基建）、e3a04cc（迭代 2 评测集）、286075d（迭代 3 agent）、本节（judge 确定性 + 本记录）。模型与阈值红线全部未动（zai-code/glm-5.2 应用侧、deepseek-v4-flash judge、阈值全 0.5）。
+
+**① 本轮运行**（2026-09-02/03 夜间，无人监督模式）
+- 定向验收 11 次（每次单进程）：G018×1、Convert×3（两次被 zai 网关夜间掐线击穿 fallback 后重跑）、G027×2、G087×2、G003/G025/G042 各 1、换手率×1、G083×1。
+- golden 12 全量两次：3 进程（`round2-full-golden`，`test_run_20260903_020719.json`——**11/12 落盘**，xdist 再丢 Qwen3.5 复现条）与单进程（`round2-full-golden-sp`，`test_run_20260903_043238.json`——**12/12 落盘**，judge `temperature=0`）。
+- evo10 全量单进程一次（`round2-full-evo10`，`test_run_20260903_031134.json`）+ G083/G087 隔离补测（`_032404`/`_032500`）。
+
+**② 分数快照**
+
+golden 12（单进程轮，8 条有效出分 + 4 条 judge 402，见 ③）：
+
+| 指标 | Round 1 | Round 2 | 说明 |
+|---|---|---|---|
+| TaskCompletion | n=9 均值 0.92 | n=8 均值 **0.975** 全过 | 低分条持续消失 |
+| StepEfficiency | n=7 均值 0.25 | n=8 均值 0.219（0.5×1、0.25×5、0.0×2） | 持平；检索型单条大改善（见下） |
+| Quant Research Rigor | 均值 0.94 | n=7 均值 0.886 | judge 温度波动范围 |
+| Actionable Deliverable | 均值 0.95 | n=5 均值 0.98 | 同上 |
+
+evo10（10/10 出分；G075 pytest timeout 2400s 未出分）：
+
+| id | Round 1 | Round 2 |
+|---|---|---|
+| G003 | FAIL（PlanQuality 0.25 空洞） | TC 0.95、PlanQuality 0.75；ToolCorrectness 0.0（零委派，见 ③-E） |
+| G018 | PASS | TC 0.95、Faith 0.9 |
+| G025 | FAIL（TC invalid-JSON） | TC **1.0**；ToolCorrectness 0.0 |
+| G027 | FAIL（fixture 缺脚本，TC 0.0） | TC **1.0**（agent 改造 fixture 脚本）；ToolCorrectness 0.0 |
+| G042 | FAIL | TC 0.8；ToolCorrectness 0.0 |
+| G060 | FAIL（正确拒绝判 0 分） | Refusal-Safe **0.7 过**、Faith 1.0 |
+| G067 | PASS | TC 1.0、Faith 0.9 |
+| G075 | 数据丢失 | timeout（超时护栏，非竞写） |
+| G083 | FAIL（SE 0.25） | TC 0.9、**SE 0.5 过线**（judge：minimal path，paper_search×1） |
+| G087 | FAIL（正确拒绝判 0 分） | Refusal-Safe **1.0**、Faith 1.0 |
+
+聚合：TC 9 条 mean 0.92、Faith 4 条 mean 0.95、zai 400 = 0、judge 400 = 0（多轮全程）。Round 1 的 2 过/7 挂/1 丢 → 9/10 条 TC 全过，挂的 4 条全部是 ToolCorrectness 零委派（已知限制）。检索型 SE 定向实测：换手率条 0.75（调用链 read_file→paper_search→paper_read→paper_section×2，同参重复检索 0）。
+
+**③ 失败诊断与发现**
+- **A. zai 网关夜间掐线 + fallback 同网关缺陷**：Convert 第二次定向 23:57-00:07 同请求 6 次 `Server disconnected without sending a response`，fallback 链耗尽后 agent 阶段失败。`glm-5.2:zai-code` 与主模型同 provider 同网关，网关级故障时 fallback 无效——跨 provider fallback 列 Round 3 候选。
+- **B. judge 尺寸 400 归零，换两种残余**：双轴 slim（元素长度 + 列表长度，两轴随 800KB 预算循环同步减半）把 Round 1 的 3.34MB/5.2MB nested 压进窗口（典型 520-750KB；最长 Convert 1.08MB 双轴触底仍超预算 35% 但窗口内容得下）。残余 ① invalid-JSON 5 起（flash 长输入偶发坏 JSON，temperature=0 未根除）；② span 结构骨架是第三体量源（chars 194K/537K 的小 trace nested 1.8-2.3MB——字段名/时间戳 × 百级 span），span 粒度裁剪列 Round 3。
+- **C. judge 402 余额耗尽**：单进程轮尾部 4 条（Process rawpaper/Search corpus/Convert/Design turnover）全指标 `402 Insufficient Balance`——外部资源硬阻塞，充值后补跑即可（agent 侧 12/12 已全部完成并被 trace 记录）。
+- **D. pytest-timeout 杀 case 留 open trace 污染后续**：G075 超时被杀后，G083/G087 首跑 metricsData 全空、toolsCalled 为 62 条 G075 式大流程调用（与输入"简单问题"矛盾）；隔离补测两条全过——超时 case 的 trace 未关闭会咬住后续 case 的 traced 断言链。**已知问题：超长 case 应单独跑**；根修（timeout 时强制 close trace）列 Round 3。
+- **E. 主代理零委派 = 模型行为特性（C1 判定）**：Round 1 归因"Code Generation Mode MUST-ask 阻塞委派"不成立——解锁（非交互默认 Lite）+ 反自干边界（映射到子代理类型的任务须委派）后，G003/G025/G027/G042 仍然零委派（6-14 次调用全 read/ls/execute/edit 自干，TC 全过）。GLM-5.2 在短单轮任务"自己能干就不委派"，prompt 层杠杆已用尽；更强手段（task 工具描述覆写需 beta HarnessProfile API、强制路由中间件、few-shot 示例）列 Round 3。影响：ToolCorrectness 含 task 的条目维持 0.0，该分反映"架构期望 vs 模型行为"的真实偏差，评测本身有效。
+- **F. 检索纪律生效面**：C2（缓存 + 纪律条款）对检索型任务实证有效（换手率 SE 0.75、G083 SE 0.25→0.5、同参重复检索 0）；对长流程任务（golden SE 0.219 持平）无效——其冗余在验证命令/todo 更新/多余 skill 阅读，非检索。分层改进列 Round 3。
+
+**④ 改动内容**（三迭代 + judge 配置，共 7 文件）
+- `tests/evals/harness.py`：slim 双轴化（列表头尾保留中间折叠，与元素上限同步减半）；`tools_called.input_parameters` 原位截断（保 ToolCall 类型）；papers 沙箱（仓库 papers/ 拷入 tmp workspace，`EVOSCIENTIST_PAPERS_DIR` 指向副本——写穿事故根绝，多轮全量后 `git status papers/` 干净）。
+- `tests/evals/metrics.py`：`DeepSeekModel(temperature=0)`（judge 确定性，打分语义不变）；fabrication/missing_data 金标的 TaskCompletion 映射为 Refusal-Safe checklist GEval（正确拒绝=完成；schema 零改动）。
+- `tests/evals/test_evoquant_evo.py`：单进程运行约定（docstring）；risk_tags 透传。
+- `tests/evals/fixtures/workspace/factor_backtest.py`（新）：seeded 自包含单因子回测脚本（模拟面板 + scipy IC/ICIR + --seed）。
+- `EvoQuant/prompts.py`：Code Generation Mode 非交互回退（默认 Lite 继续）；Task Delegation 反自干边界（单步动作才自干）。
+- `EvoQuant/papers/tools.py`：paper_search 进程内 (query,limit) 结果缓存 + `[cache]` 标记（4 个新单测）。
+- `EvoQuant/papers/prompt.py`：检索纪律第 5 条（首查命中即用/卡片够用不拉 section/定义题卡片直答）。
+
+**⑤ 结论与 Round 3 候选（本轮不执行）**
+
+三判据终值：① zai 400 = 0（多轮，达成）；② judge 400 = 0（尺寸病根消除，达成；残余为 invalid-JSON 5 起 + 402 余额 4 条，均非尺寸问题）；③ SE：golden 长流程持平（0.25→0.219），检索型显著回升（0.25→0.5-0.75），整体回升未达成但改善面清晰。
+
+Round 3 候选：跨 provider fallback；judge invalid-JSON 的 JSON 修复重试或 judge 换档；slim 第三轴（span 结构骨架裁剪）；timeout 时强制 close trace / 超长 case 隔离运行；委派的模型层手段（HarnessProfile task 描述覆写 / 强制路由 / few-shot）；长流程任务的步骤冗余治理（验证命令与 todo 更新合并）；golden 402 四条补跑（充值后）。
+
+红线自查：阈值全 0.5 未动；golden 12 未删未改；应用模型 zai-code/glm-5.2 未换；evo10 schema 零删减（G087 缺键保持）；API key 未在任何输出显示；commit 无 Co-Authored-By。

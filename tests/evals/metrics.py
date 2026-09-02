@@ -50,7 +50,11 @@ _DELIVERABLE_CRITERIA = (
 
 def build_trace_metrics():
     """Build the trace-level metric list (requires ``DEEPSEEK_API_KEY``)."""
-    judge = DeepSeekModel(model="deepseek-v4-flash")
+    # temperature=0: flash at its default sampling temperature intermittently
+    # emits unparseable JSON verdicts on long judge inputs (Round 2 full run:
+    # 4 invalid-JSON errors in one 11-case pass); deterministic decoding keeps
+    # the judge usable without changing any scoring semantics.
+    judge = DeepSeekModel(model="deepseek-v4-flash", temperature=0)
     return [
         TaskCompletionMetric(model=judge),
         StepEfficiencyMetric(model=judge),
@@ -114,7 +118,11 @@ def build_evo_metrics(primary_metrics: list[str], risk_tags: list[str] | None = 
     is exactly backwards, so the same primary metric maps to a checklist
     GEval instead (dataset schema and the 0.5 threshold are untouched).
     """
-    judge = DeepSeekModel(model="deepseek-v4-flash")
+    # temperature=0: flash at its default sampling temperature intermittently
+    # emits unparseable JSON verdicts on long judge inputs (Round 2 full run:
+    # 4 invalid-JSON errors in one 11-case pass); deterministic decoding keeps
+    # the judge usable without changing any scoring semantics.
+    judge = DeepSeekModel(model="deepseek-v4-flash", temperature=0)
     builders = {
         "TaskCompletion": lambda: TaskCompletionMetric(model=judge),
         "StepEfficiency": lambda: StepEfficiencyMetric(model=judge),
