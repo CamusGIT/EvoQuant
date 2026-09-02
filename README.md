@@ -98,17 +98,19 @@ flowchart LR
 
 ### 📄 Feeding the knowledge base
 
-The recommended way to use EvoQuant: **place your quant research report PDFs in the workspace's `rawpaper/` directory** before starting a research session.
+The papers library lives at the repo root `papers/` — mounted at `/papers/`, served through the `paper_search` / `paper_read` / `paper_section` tools:
 
 ```text
-<workspace>/
-  rawpaper/     ← drop research report PDFs here
-  markdown/     ← auto-created: full-text markdown per report
-  wiki/         ← auto-created: structured JSONL knowledge records
-  manifest.jsonl
+papers/
+  raw/{paperId}.pdf       ← drop research report PDFs here (any filename)
+  markdown/{paperId}.md   ← auto-created: full-text markdown per report
+  cards/{paperId}.jsonl   ← auto-created: structured JSONL knowledge records
+  context_brief.md / index.jsonl / manifest.jsonl
 ```
 
-- `quant-paper-extractor` converts the corpus incrementally (`rawpaper/*.pdf` → `markdown/` → `wiki/*.jsonl`), tracked by `manifest.jsonl` — re-running only processes new files.
+Three steps: **drop PDFs into `papers/raw/` → tell the agent 「入库」 → start a new session** (the paper tools mount at agent startup). The CLI prints a hint at startup whenever `papers/raw/` holds PDFs that have not been ingested yet.
+
+- `quant-paper-extractor` runs the pipeline on 「入库」: PDF → markdown → cards → refresh, hash-keyed and incremental — re-running only processes new files.
 - This local papers library is the **primary knowledge source of the autonomous research loop**: `research-ideation` grounds every idea in reports retrieved from it via `local-paper-navigator` — by design, generic web search is never used to find papers.
 
 ## 📦 Skills
@@ -195,10 +197,10 @@ Pick one LLM provider and fill in your key (Anthropic, OpenAI, Google, MiniMax, 
 uv run evoquant
 ```
 
-Then, in a session:
+Drop quant research report PDFs into `papers/raw/` to feed the knowledge base (see [Feeding the knowledge base](#-feeding-the-knowledge-base)) — the CLI reminds you at startup until they are ingested. Then, in a session:
 
 ```text
-"Extract the PDFs in rawpaper/ into my knowledge base."     # quant-paper-extractor
+"入库 / ingest the new PDFs in papers/raw/."                  # quant-paper-extractor
 "Find papers about cross-sectional momentum."                # local-paper-navigator
 "I want a research direction in alpha factor research."      # research-ideation
 "Run the proposed factor on the offline dataset and report IC/ICIR."  # quant-experiment-runtime
