@@ -29,6 +29,10 @@ def main(argv: list[str] | None = None) -> int:
     refresh_derived(Path(papers_dir))
     note = f" (noted: {', '.join(argv)})" if argv else ""
     print(f"refreshed context_brief.md + index.jsonl in {papers_dir}{note}")
+    print(
+        "note: paper tools mount at agent startup — "
+        "start a new session to use them"
+    )
     return 0
 
 

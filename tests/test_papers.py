@@ -434,7 +434,9 @@ class TestRefreshCLI:
 
         monkeypatch.setattr(refresh, "resolve_papers_dir", lambda: papers)
         assert refresh.main(["someref"]) == 0
-        assert "someref" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "someref" in out
+        assert "new session" in out  # mount-timing note
         brief = (papers / "context_brief.md").read_text(encoding="utf-8")
         assert "GFlowNet Factor Mining" in brief  # stale text was replaced
         assert (papers / "manifest.jsonl").read_text(encoding="utf-8") == manifest_before

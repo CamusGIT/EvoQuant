@@ -187,6 +187,9 @@ Extraction complete:
   Warnings:         W (short markdown, empty fields, etc.)
 ```
 
+The report must also tell the user: 语料已更新，paper 工具自新会话起可用
+(tools mount at agent startup — a restart is required, this is expected).
+
 ## Red Lines (always)
 
 1. **No fabrication.** Every extracted field must be grounded in the source text. If information is not explicitly found, return empty string. Do not infer.
