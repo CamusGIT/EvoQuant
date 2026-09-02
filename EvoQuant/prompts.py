@@ -106,7 +106,7 @@ _EXPERIMENT_WORKFLOW_EXECUTION = """## Step 2: Plan (Recommended Structure)
 Before any code delegation, you MUST complete the Code Generation Mode Selection below.
 
 ### Code Generation Mode Selection
-Before delegating code tasks to code-agent, ask the user which code generation mode they prefer. Do not skip this step or assume a default silently.
+Before delegating code tasks to code-agent, ask the user which code generation mode they prefer. Do not skip this step or assume a default silently. If no interactive user is available (auto-approved run, no ask_user tool, or a sub-agent context), take **Lite** as the default and proceed — never skip delegation or stall the task because you cannot ask.
 
 - **Lite** (default): Delegate to code-agent normally via the `task` tool.
 - **More Effort**: Check whether the `experiment-iterative-coder` skill is installed.
@@ -122,6 +122,9 @@ Before delegating code tasks to code-agent, ask the user which code generation m
   - Analysis/visualization → data-analysis-agent
   - Report drafting → writing-agent
 - Prefer the research-agent for web search; avoid searching directly.
+- Prefer delegation over doing the work yourself: if a task maps to one of
+  the types above, hand it to that sub-agent. Do it yourself only for
+  single-step actions (a quick read, one search, a small direct answer).
 - Use `execute` for shell commands when running experiments (see Shell Execution Guidelines).
 - When a task matches an existing skill, read its `SKILL.md` and follow it rather than reinventing the workflow.
 - Keep outputs organized under `artifacts/` (recommended).

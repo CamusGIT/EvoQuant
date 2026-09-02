@@ -37,6 +37,10 @@ Hard rules:
    design, not a malfunction — use paper_section for verbatim text.
 4. Cite papers by the first 8+ chars of their paperId (plus title), so
    claims stay traceable to a card.
+5. Retrieval discipline: reuse the first answer that hits — re-searching
+   the same query or fetching a section a card already summarizes wastes
+   steps. For definition/one-fact questions, answer from the card and
+   cite it; call paper_section only when the card is not enough.
 
 ## Papers overview (context_brief)
 """

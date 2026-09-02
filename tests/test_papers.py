@@ -226,6 +226,27 @@ class TestPaperTools:
         out = search.invoke({"query": "zzz-不存在的主题-qqq"})
         assert "no match" in out
 
+    def test_search_repeats_hit_cache(self, papers_dir):
+        search, _, _ = build_paper_tools(papers_dir)
+        first = search.invoke({"query": "GFlowNet"})
+        repeat = search.invoke({"query": "GFlowNet"})
+        assert "[cache]" in repeat
+        assert first in repeat  # cached body carried verbatim
+        # different casing/whitespace normalizes onto the same cache entry
+        assert "[cache]" in search.invoke({"query": "  gflownet "})
+
+    def test_search_distinct_queries_no_cache(self, papers_dir):
+        search, _, _ = build_paper_tools(papers_dir)
+        assert "[cache]" not in search.invoke({"query": "GFlowNet"})
+        assert "[cache]" not in search.invoke({"query": "momentum"})
+        assert "[cache]" not in search.invoke({"query": "zzz-miss-q"})
+
+    def test_search_cache_is_per_tool_instance(self, papers_dir):
+        search_a, _, _ = build_paper_tools(papers_dir)
+        search_b, _, _ = build_paper_tools(papers_dir)
+        search_a.invoke({"query": "GFlowNet"})
+        assert "[cache]" not in search_b.invoke({"query": "GFlowNet"})
+
     def test_read_returns_card_and_outline(self, papers_dir):
         _, read, _ = build_paper_tools(papers_dir)
         out = read.invoke({"paper_id": "aaaa1111bbbb2222cccc"})

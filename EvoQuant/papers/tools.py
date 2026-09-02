@@ -204,6 +204,12 @@ def build_paper_tools(papers_dir: str | Path | None) -> list:
     if not papers_dir or not papers_are_available(papers_dir):
         return []
     root = Path(papers_dir)
+    # Per-tool-instance result cache: an identical (query, limit) asked again
+    # returns the stored answer with a [cache] marker instead of rescoring —
+    # repeated identical searches are the top retrieval-discipline waste.
+    # Lives in this closure (not module level) so each build gets fresh
+    # state and tests stay independent.
+    _search_cache: dict[tuple[str, int], str] = {}
 
     @tool(parse_docstring=True)
     def paper_search(query: str, limit: int = 8) -> str:
@@ -224,6 +230,13 @@ def build_paper_tools(papers_dir: str | Path | None) -> list:
             message when nothing scores above zero.
         """
         limit = max(1, min(int(limit), MAX_SEARCH_LIMIT))
+        key = (query.strip().lower(), limit)
+        if key in _search_cache:
+            return (
+                _search_cache[key]
+                + "\n[cache] identical query already answered above — "
+                "reuse this result instead of searching again."
+            )
         cards = _load_cards(root)
         q = _tokenize(query)
         scored = sorted(
@@ -238,19 +251,22 @@ def build_paper_tools(papers_dir: str | Path | None) -> list:
                 {k for c in cards for k in (c.get("keywords") or [])}
             )[:15]
             kw_hint = f"Known keywords include: {', '.join(keywords)}." if keywords else ""
-            return (
+            result = (
                 f"{header}\nno match. The root may genuinely not cover this "
                 f"topic — say so rather than inventing content. Try broader "
                 f"terms, or read /papers/context_brief.md for what exists. {kw_hint}"
             )
-        rows = []
-        for c, s in hits:
-            tldr = str(c.get("tldr", "")).replace("\n", " ")[:200]
-            rows.append(
-                f"{str(c.get('paperId', ''))[:12]} | {c.get('year', '?')} | "
-                f"{c.get('source', '?')} | {s:.0f} | {c.get('title', '?')} | {tldr}"
-            )
-        return header + "\n" + "\n".join(rows)
+        else:
+            rows = []
+            for c, s in hits:
+                tldr = str(c.get("tldr", "")).replace("\n", " ")[:200]
+                rows.append(
+                    f"{str(c.get('paperId', ''))[:12]} | {c.get('year', '?')} | "
+                    f"{c.get('source', '?')} | {s:.0f} | {c.get('title', '?')} | {tldr}"
+                )
+            result = header + "\n" + "\n".join(rows)
+        _search_cache[key] = result
+        return result
 
     @tool(parse_docstring=True)
     def paper_read(paper_id: str) -> str:
