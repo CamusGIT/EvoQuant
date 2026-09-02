@@ -1,6 +1,6 @@
 ---
 name: local-paper-navigator
-description: "Find and read papers from the local research-report corpus (repo corpus/, mounted at /papers/). Three native tools form a reading funnel: paper_search (one line per paper), paper_read (card + section outline), paper_section (one verbatim section — the only full-text access). Use when: find papers in the local corpus, read a local report, compare corpus viewpoints, keyword search across extracted knowledge. Do NOT use for: online paper search (use paper-navigator), survey reports (use research-survey), idea generation (use research-ideation)."
+description: "Find and read papers from the local papers library (repo papers/, mounted at /papers/). Three native tools form a reading funnel: paper_search (one line per paper), paper_read (card + section outline), paper_section (one verbatim section — the only full-text access). Use when: find papers in the local library, read a local report, compare viewpoints across papers, keyword search across extracted knowledge. Do NOT use for: online paper search (use paper-navigator), survey reports (use research-survey), idea generation (use research-ideation)."
 allowed-tools: "think_tool paper_search paper_read paper_section read_file"
 metadata:
   author: quant-research-team

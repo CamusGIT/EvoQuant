@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Shared utilities for local-paper-navigator scripts.
 
-Zero network. All operations are local file I/O over the repo corpus
-(<repo>/corpus: cards/, markdown/, manifest.jsonl; override with
+Zero network. All operations are local file I/O over the repo papers
+directory (<repo>/papers: cards/, markdown/, manifest.jsonl; override with
 EVOSCIENTIST_CORPUS_DIR or --corpus-dir).
 
 The corpus location is derived from this file's own path, so no
@@ -27,7 +27,7 @@ _CORPUS_ENV = "EVOSCIENTIST_CORPUS_DIR"
 
 
 def _default_corpus_dir() -> Path:
-    """env override > <repo>/corpus derived from this file's location.
+    """env override > <repo>/papers derived from this file's location.
 
     scripts/ -> local-paper-navigator/ -> skills/ -> package/ -> repo root.
     Kept local (no package import): these scripts run on ad-hoc sys.paths.
@@ -35,7 +35,7 @@ def _default_corpus_dir() -> Path:
     explicit = os.environ.get(_CORPUS_ENV)
     if explicit:
         return Path(explicit).resolve()
-    return Path(__file__).resolve().parents[4] / "corpus"
+    return Path(__file__).resolve().parents[4] / "papers"
 
 
 def get_corpus_dir() -> Path:
@@ -198,7 +198,7 @@ def add_workspace_args(parser: argparse.ArgumentParser) -> None:
         "--corpus-dir",
         default=None,
         help="Corpus root containing cards/, markdown/, manifest.jsonl "
-        f"(default: ${_CORPUS_ENV} or <repo>/corpus)",
+        f"(default: ${_CORPUS_ENV} or <repo>/papers)",
     )
     parser.add_argument(
         "--workspace-dir",

@@ -3,15 +3,15 @@
 本文件是 agent 与仓库之间的硬约定：语料库长什么样、怎么读、什么不能碰。
 硬规则的优先级高于任何 skill 的建议。
 
-## 语料库布局（仓库根 `corpus/`，只读）
+## 语料库布局（仓库根 `papers/`，只读）
 
 | 路径 | 内容 | agent 访问方式 |
 |---|---|---|
-| `corpus/cards/{paperId}.jsonl` | 论文卡片（tldr/摘要/分节总结） | `paper_read` / 直接读 `/papers/cards/` |
-| `corpus/markdown/{paperId}.md` | 全文 markdown | **仅** `paper_section` 按节读 |
-| `corpus/raw/{paperId}.pdf` | 原始 PDF | **禁止**（卡片已承载内容） |
-| `corpus/context_brief.md` | 全库概览（≤4000 字符） | 直接读 `/papers/context_brief.md` |
-| `corpus/index.jsonl` | 派生索引 | 直接读 `/papers/index.jsonl` |
+| `papers/cards/{paperId}.jsonl` | 论文卡片（tldr/摘要/分节总结） | `paper_read` / 直接读 `/papers/cards/` |
+| `papers/markdown/{paperId}.md` | 全文 markdown | **仅** `paper_section` 按节读 |
+| `papers/raw/{paperId}.pdf` | 原始 PDF | **禁止**（卡片已承载内容） |
+| `papers/context_brief.md` | 全库概览（≤4000 字符） | 直接读 `/papers/context_brief.md` |
+| `papers/index.jsonl` | 派生索引 | 直接读 `/papers/index.jsonl` |
 
 关联键统一为 `paperId`（PDF、全文、卡片三层同名）。PDF 不再以中文文件名寻址。
 
@@ -34,5 +34,5 @@ paper_section(paper_id, heading)  # L1：单节原文（引用时的逃生舱）
 ## 历史遗留
 
 workspace 下的 `rawpaper/`、`markdown/`、`wiki/`、`manifest.jsonl` 已废弃
-（迁移至 `corpus/`，旧位置移入 `_corpus_migrated_backup_*/`）。不要读、
+（迁移至 `papers/`，旧位置移入 `_papers_migrated_backup_*/`）。不要读、
 不要写、不要再通过环境变量定位它们。

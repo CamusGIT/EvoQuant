@@ -2,7 +2,7 @@
 
 Layout (see AGENT.md at the repo root for the agent-facing contract):
 
-    corpus/
+    papers/
       raw/{paperId}.pdf       # original PDFs (gitignored; machine-blocked)
       markdown/{paperId}.md   # full text (machine-blocked; per-section only)
       cards/{paperId}.jsonl   # paper cards — the default reading layer

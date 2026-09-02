@@ -1,6 +1,6 @@
 ---
 name: quant-paper-extractor
-description: "Convert quantitative research report PDFs to markdown, then extract structured knowledge (paperId, title, year, source, keywords, tldr, abstract, strategy, method, experiment, result) into JSONL paper cards. Writes into the repo corpus (corpus/raw, corpus/markdown, corpus/cards) and refreshes context_brief.md + index.jsonl. Use when: adding quant research PDFs to the knowledge base, extracting structured data from reports. Do NOT use for: academic paper search (use paper-navigator), idea generation (use research-ideation), literature surveys (use research-survey)."
+description: "Convert quantitative research report PDFs to markdown, then extract structured knowledge (paperId, title, year, source, keywords, tldr, abstract, strategy, method, experiment, result) into JSONL paper cards. Writes into the repo papers directory (papers/raw, papers/markdown, papers/cards) and refreshes context_brief.md + index.jsonl. Use when: adding quant research PDFs to the knowledge base, extracting structured data from reports. Do NOT use for: academic paper search (use paper-navigator), idea generation (use research-ideation), literature surveys (use research-survey)."
 allowed-tools: "write_file edit_file read_file think_tool execute"
 metadata:
   author: quant-research-team
@@ -13,16 +13,16 @@ metadata:
 Batch-convert quantitative research report PDFs (量化研究研报) to structured JSONL paper cards. Two-phase pipeline writing into the repo corpus:
 
 ```
-corpus/raw/{paperId}.pdf
+papers/raw/{paperId}.pdf
       │
       ▼ Phase 1: PDF → Markdown (pdf_to_markdown.py)
-corpus/markdown/{paperId}.md
+papers/markdown/{paperId}.md
       │
       ▼ Phase 2: Markdown → card (agent-driven extraction)
-corpus/cards/{paperId}.jsonl
+papers/cards/{paperId}.jsonl
       │
       ▼ Phase 3: refresh derived artifacts
-corpus/context_brief.md + corpus/index.jsonl
+papers/context_brief.md + papers/index.jsonl
 ```
 
 ## Setup
@@ -32,7 +32,7 @@ directory. Dependencies: `pip install -e .`.
 
 ## Pre-conditions
 
-The corpus lives at the repo root (`corpus/`; override with
+The papers directory lives at the repo root (`papers/`; override with
 `EVOSCIENTIST_CORPUS_DIR`). Resolve it once and reuse:
 
 ```bash
