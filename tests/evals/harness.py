@@ -75,6 +75,11 @@ httpx.Client.send = _logging_send_sync
 
 EVAL_DIR = Path(__file__).parent
 FIXTURE_WS = EVAL_DIR / "fixtures" / "workspace"
+# Repo-level papers library (11 reports). Copied into each run's tmp workspace
+# and pointed at via EVOSCIENTIST_PAPERS_DIR so agent writes through the paper
+# tools land in the throwaway copy, never in the repo (Round 1 saw a golden
+# run rewrite papers/cards/…jsonl in the source tree).
+REPO_PAPERS = EVAL_DIR.parent.parent / "papers"
 
 
 def _eval_config():
@@ -127,32 +132,61 @@ def _slim_trace_for_judge(thread_id: str, span_chars: int = 1000) -> None:
     """
     from deepeval.tracing import trace_manager
 
-    def _slim(v, limit: int):
+    # List-length axis: each LLM span's input is the FULL message history of
+    # that call, so a 49-turn run carries ~50-lists inside ~150 spans —
+    # element-level truncation alone leaves multi-MB nested JSON (Convert
+    # post-fix: 5.2MB at the 125-char floor). Keep head+tail (task framing
+    # + recent context carry the semantics) and fold the middle. max_list
+    # halves with limit in the budget loop below so the loop always has a
+    # second lever instead of bottoming out at the 125-char floor.
+    def _slim_list(xs, limit: int, max_list: int):
+        if len(xs) <= max_list:
+            return [_slim(x, max(limit // 2, 200), max_list) for x in xs]
+        keep = max_list // 2
+        head = [_slim(x, max(limit // 2, 200), max_list) for x in xs[:keep]]
+        tail = [_slim(x, max(limit // 2, 200), max_list) for x in xs[-keep:]]
+        return head + [f"...[{len(xs) - 2 * keep} elements omitted]..."] + tail
+
+    def _slim(v, limit: int, max_list: int):
         if isinstance(v, str):
             if len(v) <= limit:
                 return v
             return v[:limit] + f" ...[truncated, {len(v) - limit} chars omitted]"
         if isinstance(v, list):
-            return [_slim(x, max(limit // 2, 200)) for x in v]
+            return _slim_list(v, limit, max_list)
         if isinstance(v, dict):
-            return {k: _slim(x, max(limit // 2, 200)) for k, x in v.items()}
+            return {
+                k: _slim(x, max(limit // 2, 200), max_list)
+                for k, x in v.items()
+            }
         if v is None or isinstance(v, (bool, int, float)):
             return v
         # Arbitrary object — e.g. langchain BaseMessage. Its repr carries the
         # full payload (content + reasoning_content), and serialize_to_json
         # later model_dumps it whole, so passing it through untouched kept
-        # judge prompts at 11MB. Replace with a truncated string repr.
+        # judge prompts at 11MB. Replace with a truncated string repr
+        # UNCONDITIONALLY: a repr small enough to pass the old len check
+        # still model_dumps to several KB (Round 1 post-mortem: payload
+        # already capped at 125 chars yet nested JSON stayed at 3.3MB —
+        # the bulk lived in hundreds of sub-limit objects whose dumped
+        # form dwarfs their repr).
         s = str(v)
-        if len(s) <= limit:
-            return v
         return s[:limit] + f" ...[truncated, {len(s) - limit} chars omitted]"
 
-    def _walk(span, limit: int) -> None:
+    def _slim_tool_params(tc, limit: int, max_list: int) -> None:
+        # ToolCall objects themselves must survive _convert_span_to_api_span
+        # (strongly typed List[ToolCall]) — but their input_parameters field
+        # is dict-typed and unbounded: execute carries whole scripts,
+        # write_file whole documents (Round 1: the other half of the 3.3MB).
+        # _slim maps dict->dict so the pydantic dict_type validation still
+        # passes; mutate the field value in place, object type unchanged.
+        params = getattr(tc, "input_parameters", None)
+        if isinstance(params, dict):
+            tc.input_parameters = _slim(params, limit, max_list)
+
+    def _walk(span, limit: int, max_list: int) -> None:
         # Every field that can carry unbounded payload AND has a loose
-        # type on the API span. `tools_called` is strongly validated as
-        # List[ToolCall] by _convert_span_to_api_span — replacing ToolCall
-        # objects with strings crashes the conversion (pydantic
-        # model_type error), and tool calls are small anyway. Leave it.
+        # type on the API span.
         for field in (
             "input",
             "output",
@@ -163,9 +197,11 @@ def _slim_trace_for_judge(thread_id: str, span_chars: int = 1000) -> None:
         ):
             v = getattr(span, field, None)
             if v is not None:
-                setattr(span, field, _slim(v, limit))
+                setattr(span, field, _slim(v, limit, max_list))
+        for tc in getattr(span, "tools_called", None) or []:
+            _slim_tool_params(tc, limit, max_list)
         for child in getattr(span, "children", None) or []:
-            _walk(child, limit)
+            _walk(child, limit, max_list)
 
     # The judge reads the trace off current_trace_context (same source as
     # assert_test), NOT necessarily off trace_manager.traces — grab both,
@@ -217,23 +253,26 @@ def _slim_trace_for_judge(thread_id: str, span_chars: int = 1000) -> None:
 
         before = _tree_size(trace.root_spans)
         limit = span_chars
+        max_list = 40
         while True:
             for root in trace.root_spans:
-                _walk(root, limit)
+                _walk(root, limit, max_list)
             try:
                 nested_chars = _nested_json_chars(trace)
             except Exception as exc:  # noqa: BLE001
                 nested_chars = -1
                 log_lines.append(f"  nested measure err: {exc!r}")
                 break
-            if nested_chars <= _NESTED_BUDGET or limit < 150:
+            if nested_chars <= _NESTED_BUDGET or (limit < 150 and max_list <= 4):
                 break
-            limit //= 2  # re-walk everything at a tighter cap (idempotent)
+            # Two levers halve together: per-element chars and list length.
+            limit //= 2
+            max_list = max(max_list // 2, 4)
         after = _tree_size(trace.root_spans)
         log_lines.append(
             f"  trace={type(trace).__name__} roots={n_roots} "
             f"chars={before}->{after} nested_json={nested_chars} "
-            f"final_limit={limit} "
+            f"final_limit={limit} final_max_list={max_list} "
             f"roots_types={[type(r).__name__ for r in trace.root_spans][:5]}"
         )
     with open("/tmp/zai_req_smoke.log", "a") as fh:
@@ -242,6 +281,8 @@ def _slim_trace_for_judge(thread_id: str, span_chars: int = 1000) -> None:
 
 def _run_traced(golden_input: str, workspace: Path, run_async) -> str:
     """Build + invoke the real agent once, traced; returns the thread_id."""
+    import shutil
+
     from EvoQuant.EvoQuant import create_cli_agent
     from EvoQuant.llm.models import get_chat_model
     from EvoQuant.paths import set_workspace_root
@@ -250,6 +291,17 @@ def _run_traced(golden_input: str, workspace: Path, run_async) -> str:
 
     cfg = _eval_config()
     chat_model = get_chat_model(model=cfg.model, provider=cfg.provider)
+
+    # Papers sandbox: point the paper tools at a throwaway copy inside the
+    # run's workspace. EVOSCIENTIST_PAPERS_DIR outranks <repo>/papers in
+    # resolve_papers_dir, and set_workspace_root re-resolves it below —
+    # Round 1 saw an eval run write through the card-update path into
+    # papers/cards/… in the source tree.
+    if REPO_PAPERS.is_dir():
+        ws_papers = workspace / "papers"
+        if not ws_papers.exists():
+            shutil.copytree(REPO_PAPERS, ws_papers)
+        os.environ["EVOSCIENTIST_PAPERS_DIR"] = str(ws_papers)
 
     # Order matters: memory-dir env override (per-test) -> workspace root ->
     # agent build. set_workspace_root re-reads EVOSCIENTIST_MEMORIES_DIR, and

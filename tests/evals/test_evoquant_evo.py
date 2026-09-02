@@ -18,9 +18,11 @@ hand-adapted set. Differences from the golden suite's runner:
 - ``EVOQUANT_SMOKE`` also matches metadata ids (EVOSCI-G###) — the evo10
   inputs are short and share vocabulary, ids are the stable selector
 
-Run:
+Run (single process — REQUIRED: under xdist the per-worker test-run writers
+race and clobber each other, and one worker crash loses its whole batch;
+Round 1's 3-process run persisted only 1/10 cases):
     EVOSCIENTIST_EVALS=1 uv run deepeval test run tests/evals/test_evoquant_evo.py \
-        --identifier "evo10-quant-baseline-0" --num-processes 3 --ignore-errors
+        --identifier "evo10-quant-baseline-1" --num-processes 1 --ignore-errors
 
 The ``EVOSCIENTIST_EVALS`` guard keeps plain ``uv run pytest`` from
 collecting — and billing — these LLM-in-the-loop evals.
