@@ -2192,6 +2192,16 @@ def _main_callback(
     # Ensure memory and skills subdirs exist in workspace
     ensure_dirs()
 
+    # Onboarding: one yellow line when the papers library is missing or has
+    # un-ingested PDFs. Stateless — silent the moment the condition clears,
+    # so returning users with a healthy library see nothing. Read PAPERS_DIR
+    # through the module (set_workspace_root above re-assigns it).
+    from .. import paths as paths_mod
+    from ..papers.onboarding import onboarding_hint
+
+    if hint := onboarding_hint(paths_mod.PAPERS_DIR):
+        console.print(f"[yellow]{escape(hint)}[/yellow]")
+
     # WebUI mode: instead of the in-terminal CLI/TUI, run a deploy-style
     # langgraph server (full MCP + async) + the published @evoquant/webui
     # front-end (npx) in THIS terminal, then block. Reuses start_langgraph_dev

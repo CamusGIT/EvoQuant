@@ -497,3 +497,53 @@ class TestCompositeIntegration:
 
         registry, _ = E._base_tool_registry()
         assert not [n for n in registry if n.startswith("paper_")]
+
+
+# ---------------------------------------------------------------------------
+# onboarding hints
+# ---------------------------------------------------------------------------
+
+
+class TestOnboarding:
+    def test_missing_dir_points_at_raw(self, tmp_path):
+        from EvoQuant.papers.onboarding import onboarding_hint
+
+        for absent in (None, tmp_path / "nope"):
+            hint = onboarding_hint(absent)
+            assert hint is not None and "papers/raw" in hint
+
+    def test_empty_library_silent(self, tmp_path):
+        from EvoQuant.papers.onboarding import onboarding_hint
+
+        (tmp_path / "papers").mkdir()
+        assert onboarding_hint(tmp_path / "papers") is None
+
+    def test_pending_pdfs_counted(self, tmp_path):
+        from EvoQuant.papers.onboarding import onboarding_hint
+
+        root = tmp_path / "papers"
+        (root / "raw").mkdir(parents=True)
+        (root / "raw" / f"{CARDS[0]['paperId']}.pdf").write_bytes(b"%PDF-a")
+        (root / "raw" / f"{'deadbeef' * 8}.pdf").write_bytes(b"%PDF-b")
+        (root / "manifest.jsonl").write_text(
+            json.dumps({"paperId": CARDS[0]["paperId"], "status": "extraction_done"}),
+            encoding="utf-8",
+        )
+        hint = onboarding_hint(root)
+        assert hint and "1 份" in hint
+
+    def test_all_ingested_silent(self, tmp_path):
+        from EvoQuant.papers.onboarding import onboarding_hint
+
+        root = tmp_path / "papers"
+        (root / "raw").mkdir(parents=True)
+        for card in CARDS:
+            (root / "raw" / f"{card['paperId']}.pdf").write_bytes(b"%PDF-x")
+        (root / "manifest.jsonl").write_text(
+            "\n".join(
+                json.dumps({"paperId": c["paperId"], "status": "extraction_done"})
+                for c in CARDS
+            ),
+            encoding="utf-8",
+        )
+        assert onboarding_hint(root) is None
