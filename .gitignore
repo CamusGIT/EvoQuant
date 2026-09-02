@@ -38,7 +38,7 @@ workspace/
 # Repo papers: text artifacts committed, broker PDFs are not (copyright)
 papers/raw/
 
-# Eval snapshot corpus: text artifacts committed, broker PDFs are not
+# Eval snapshot papers: text artifacts committed, broker PDFs are not
 !tests/evals/fixtures/workspace/
 tests/evals/fixtures/workspace/rawpaper/
 skills/
