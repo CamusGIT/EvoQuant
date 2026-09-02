@@ -135,5 +135,7 @@ def test_evo10_single_turn(golden: Golden, tmp_path: Path, run_async):
 
     assert_test(
         golden=golden,
-        metrics=build_evo_metrics(md.get("primary_metrics", [])),
+        metrics=build_evo_metrics(
+            md.get("primary_metrics", []), risk_tags=md.get("risk_tags")
+        ),
     )
